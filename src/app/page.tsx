@@ -28,7 +28,7 @@ const AppContainer = styled.div<{ $backgroundColor?: string }>`
   background-color: ${props => props.$backgroundColor || '#8D6BED'};
 `;
 
-const EmojiButtonBar = styled.div`
+const CardButtonBar = styled.div`
   display: flex;
   position: fixed;
   bottom: 0;
@@ -40,23 +40,29 @@ const EmojiButtonBar = styled.div`
   padding: 1rem 0px;
 `;
 
-const EmojiButton = styled.button<{ $disabled?: boolean }>`
+const CardButton = styled.button<{ $disabled?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 4rem;
-  height: 4rem;
-  border-radius: 50%;
+  width: 5rem;
+  height: 7rem;
+  border-radius: 0.8rem;
   background-color: #fff;
-  color: #FF7F56;
-  font-size: 2rem;
   cursor: ${props => props.$disabled ? 'not-allowed' : 'pointer'};
   box-shadow: 0px 0.4rem 0px rgba(0, 0, 0, 0.25);
-  border: none;
+  border: 2px solid #333;
   opacity: ${props => props.$disabled ? 0.5 : 1};
+  padding: 0.5rem;
 
   &:hover {
     transform: ${props => props.$disabled ? 'none' : 'translateY(-2px)'};
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 0.4rem;
   }
 `;
 
@@ -90,24 +96,35 @@ const slideUp = keyframes`
   }
 `;
 
-const EmojiDisplay = styled.div`
+const CardDisplay = styled.div`
   display: flex;
   height: 100%;
   width: 100%;
   align-items: center;
   justify-content: center;
-  font-size: 6rem;
   position: absolute;
 `;
 
-const Card = styled.span<{ $transform?: string }>`
+const PlayedCard = styled.div<{ $transform?: string }>`
   background: #fff;
-  border: 2px solid #000000;
-  border-radius: 1rem;
-  padding: 3rem 2rem;
+  border: 3px solid #333;
+  border-radius: 1.2rem;
+  padding: 1rem;
   animation: ${slideUp} 2s linear;
   transform: ${props => props.$transform || 'none'};
   position: relative;
+  width: 8rem;
+  height: 12rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 0.6rem;
+  }
 `;
 
 const Avatar = styled.span`
@@ -116,6 +133,7 @@ const Avatar = styled.span`
     position: absolute;
     top: 3px;
     left: 3px;
+    border-radius: 50%;
   }
 `;
 
@@ -126,22 +144,32 @@ const randomRotations = Array(20).fill(0).map(() =>
   `rotate(${randomNumBetween(-5,5)}deg) translateX(${randomNumBetween(-10,10)}px)`
 );
 
-interface EmojiData {
-  emoji: string;
+interface CardData {
+  cardPath: string;
   id: string;
 }
 
+const suits = ['club', 'coin', 'cup', 'sword'];
+const values = ['1', '2', '3', '4', '5', '6', '7', 'jack', 'knight', 'king'];
+
+const getRandomCard = () => {
+  const suit = suits[randomNumBetween(0, suits.length - 1)];
+  const value = values[randomNumBetween(0, values.length - 1)];
+  return `/assets/cards/${suit}/${suit}_${value}.png`;
+};
+
 const GameApp = () => {
   const players = usePlayersList();
-  const [currentEmoji, setCurrentEmoji] = useMultiplayerState<EmojiData[]>("emoji", []);
+  const [playedCards, setPlayedCards] = useMultiplayerState<CardData[]>("playedCards", []);
   const [currentTurn, setCurrentTurn] = useMultiplayerState("currentTurn", 0);
   
   const isMyTurn = players.findIndex(p => p.id === myPlayer()?.id) === currentTurn;
   
-  const handleEmojiClick = (emoji: string) => {
+  const handleCardPlay = () => {
     if (!isMyTurn || !myPlayer()) return;
     
-    setCurrentEmoji([...currentEmoji, { emoji, id: myPlayer()!.id }]);
+    const randomCard = getRandomCard();
+    setPlayedCards([...playedCards, { cardPath: randomCard, id: myPlayer()!.id }]);
     setCurrentTurn((currentTurn + 1) % players.length);
   };
 
@@ -150,42 +178,42 @@ const GameApp = () => {
   return (
     <AppContainer $backgroundColor={playerColor}>
       <GlobalStyle />
-      {currentEmoji.map((emojiData, i) => {
-        const player = players.find(p => p.id === emojiData.id);
+      {playedCards.map((cardData, i) => {
+        const player = players.find(p => p.id === cardData.id);
         if (!player) return null;
         
         return (
-          <EmojiDisplay key={i}>
-            <Card $transform={randomRotations[i % randomRotations.length]}>
+          <CardDisplay key={i}>
+            <PlayedCard $transform={randomRotations[i % randomRotations.length]}>
               <Avatar>
                 <img src={player.getProfile().photo} alt="Player avatar" />
               </Avatar>
-              {emojiData.emoji}
-            </Card>
-          </EmojiDisplay>
+              <img src={cardData.cardPath} alt="Playing card" />
+            </PlayedCard>
+          </CardDisplay>
         );
       })}
       
-      <EmojiButtonBar>
-        <EmojiButton 
+      <CardButtonBar>
+        <CardButton 
           $disabled={!isMyTurn}
-          onClick={() => handleEmojiClick("🫶")}
+          onClick={handleCardPlay}
         >
-          <span role="img">🫶</span>
-        </EmojiButton>
-        <EmojiButton 
+          <img src={getRandomCard()} alt="Card to play" />
+        </CardButton>
+        <CardButton 
           $disabled={!isMyTurn}
-          onClick={() => handleEmojiClick("🥳")}
+          onClick={handleCardPlay}
         >
-          <span role="img">🥳</span>
-        </EmojiButton>
-        <EmojiButton 
+          <img src={getRandomCard()} alt="Card to play" />
+        </CardButton>
+        <CardButton 
           $disabled={!isMyTurn}
-          onClick={() => handleEmojiClick("👋")}
+          onClick={handleCardPlay}
         >
-          <span role="img">👋</span>
-        </EmojiButton>
-      </EmojiButtonBar>
+          <img src={getRandomCard()} alt="Card to play" />
+        </CardButton>
+      </CardButtonBar>
     </AppContainer>
   );
 };

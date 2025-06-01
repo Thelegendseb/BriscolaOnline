@@ -1,6 +1,6 @@
 # 🃏 Briscola Online (Brisca)
 
-> A simple online version of the classic European card game Briscola (Brisca) — play with your friends in real-time!
+A simple online version of the classic European card game Briscola (Brisca) — play with your friends in real-time!
 
 ![GitHub last commit](https://img.shields.io/github/last-commit/Thelegendseb/BriscolaOnline)
 ![GitHub issues](https://img.shields.io/github/issues/Thelegendseb/BriscolaOnline)
