@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import styled, { keyframes, createGlobalStyle } from "styled-components";
-import { 
+import {
   useMultiplayerState,
-  insertCoin, 
+  insertCoin,
   myPlayer,
   usePlayersList,
   PlayerState,
@@ -13,6 +13,20 @@ import {
   getState,
   isHost
 } from "playroomkit";
+import {
+  CardComponent,
+  Card,
+  Suit,
+  CardValue,
+  createDeck,
+  shuffleDeck,
+  BRISCOLA_VALUE_ORDER
+} from '@/components/Card';
+import { 
+  Notification, 
+  useNotification, 
+  NotificationType 
+} from '@/components/Notification';
 
 // ===== COLOR THEME =====
 const COLORS = {
@@ -31,49 +45,6 @@ const COLORS = {
 } as const;
 
 // ===== TYPE DEFINITIONS =====
-enum Suit {
-  CLUB = 'club',
-  COIN = 'coin',
-  CUP = 'cup',
-  SWORD = 'sword'
-}
-
-enum CardValue {
-  ONE = '1',
-  TWO = '2',
-  THREE = '3',
-  FOUR = '4',
-  FIVE = '5',
-  SIX = '6',
-  SEVEN = '7',
-  JACK = 'jack',
-  KNIGHT = 'knight',
-  KING = 'king'
-}
-
-// Briscola value order: 1, 3, King, Knight, Jack, 7, 6, 5, 4, 2
-const BRISCOLA_VALUE_ORDER: CardValue[] = [
-  CardValue.ONE,
-  CardValue.THREE,
-  CardValue.KING,
-  CardValue.KNIGHT,
-  CardValue.JACK,
-  CardValue.SEVEN,
-  CardValue.SIX,
-  CardValue.FIVE,
-  CardValue.FOUR,
-  CardValue.TWO
-];
-
-interface Card {
-  suit: Suit;
-  value: CardValue;
-  score: number;
-  name: string;
-  imagePath: string;
-  id: string; // Unique identifier
-}
-
 interface PlayedCardData {
   card: Card;
   playerId: string;
@@ -87,10 +58,12 @@ interface PlayerInfo {
   color: string;
 }
 
-interface NotificationState {
-  message: string;
-  visible: boolean;
-  timestamp: number;
+interface PlayerHand {
+  [playerId: string]: Card[];
+}
+
+interface PlayerStack {
+  [playerId: string]: Card[];
 }
 
 interface GameState {
@@ -98,61 +71,22 @@ interface GameState {
   trumpCard: Card | null;
   gameStarted: boolean;
   isShuffling: boolean;
+  playerHands: PlayerHand;
+  playerStacks: PlayerStack;
+  cardsDealt: boolean;
+  currentRound: number;
+  roundWinner: string | null;
+  isResolvingTrick: boolean;
+  gameOver: boolean;
+  finalScores: { [playerId: string]: number };
+  gameWinner: string | null;
 }
 
-// ===== CONSTANTS =====
-const CARD_SCORES: Record<CardValue, number> = {
-  [CardValue.ONE]: 11,
-  [CardValue.TWO]: 0,
-  [CardValue.THREE]: 10,
-  [CardValue.FOUR]: 0,
-  [CardValue.FIVE]: 0,
-  [CardValue.SIX]: 0,
-  [CardValue.SEVEN]: 0,
-  [CardValue.JACK]: 2,
-  [CardValue.KNIGHT]: 3,
-  [CardValue.KING]: 4
-};
-
-const CARD_NAMES: Record<CardValue, string> = {
-  [CardValue.ONE]: 'Ace',
-  [CardValue.TWO]: 'Two',
-  [CardValue.THREE]: 'Three',
-  [CardValue.FOUR]: 'Four',
-  [CardValue.FIVE]: 'Five',
-  [CardValue.SIX]: 'Six',
-  [CardValue.SEVEN]: 'Seven',
-  [CardValue.JACK]: 'Jack',
-  [CardValue.KNIGHT]: 'Knight',
-  [CardValue.KING]: 'King'
-};
-
-const createDeck = (): Card[] => {
-  return Object.values(Suit).flatMap(suit =>
-    Object.values(CardValue).map(value => ({
-      suit,
-      value,
-      score: CARD_SCORES[value],
-      name: `${CARD_NAMES[value]} of ${suit}s`,
-      imagePath: `/assets/cards/${suit}/${suit}_${value}.png`,
-      id: `${suit}_${value}`
-    }))
-  );
-};
-
-const shuffleDeck = (deck: Card[]): Card[] => {
-  const shuffled = [...deck];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-};
-
 const MOBILE_BREAKPOINT = '768px';
+const CARDS_PER_PLAYER = 3;
 
 // ===== UTILITY FUNCTIONS =====
-const randomNumBetween = (min: number, max: number): number => 
+const randomNumBetween = (min: number, max: number): number =>
   Math.floor(Math.random() * (max - min + 1) + min);
 
 const generateRandomTransform = (): string =>
@@ -165,26 +99,53 @@ const extractPlayerInfo = (player: PlayerState): PlayerInfo => ({
   color: player.getProfile()?.color?.hexString || COLORS.accent
 });
 
-const sleep = (ms: number): Promise<void> => 
+const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
+
+// Placeholder trick evaluation function
+const evaluateRound = (playedCards: PlayedCardData[], trumpSuit: Suit): string => {
+  // For now, randomly select a winner
+  const randomIndex = Math.floor(Math.random() * playedCards.length);
+  return playedCards[randomIndex].playerId;
+};
+
+// Calculate final scores based on card values
+const evaluateGame = (playerStacks: PlayerStack): { scores: { [playerId: string]: number }, winner: string } => {
+  const scores: { [playerId: string]: number } = {};
+  
+  Object.keys(playerStacks).forEach(playerId => {
+    const stack = playerStacks[playerId];
+    scores[playerId] = stack.reduce((total, card) => total + card.score, 0);
+  });
+
+  // Find winner (highest score)
+  const winner = Object.keys(scores).reduce((a, b) => scores[a] > scores[b] ? a : b);
+  
+  return { scores, winner };
+};
 
 // ===== COMPONENTS =====
 interface PlayerListProps {
   players: PlayerState[];
   currentTurnIndex: number;
+  playerStacks: PlayerStack;
 }
 
-const PlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex }) => (
+const PlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex, playerStacks }) => (
   <PlayerListContainer>
     <PlayerListTitle>Players ({players.length})</PlayerListTitle>
     {players.map((player, index) => {
       const playerInfo = extractPlayerInfo(player);
       const isCurrentTurn = index === currentTurnIndex;
-      
+      const stackCount = playerStacks[player.id]?.length || 0;
+
       return (
         <PlayerItem key={playerInfo.id} $isCurrentTurn={isCurrentTurn}>
           <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
-          <PlayerName>{playerInfo.username}</PlayerName>
+          <PlayerDetails>
+            <PlayerName>{playerInfo.username}</PlayerName>
+            <StackCount>{stackCount} cards won</StackCount>
+          </PlayerDetails>
           {isCurrentTurn && <TurnIndicator>●</TurnIndicator>}
         </PlayerItem>
       );
@@ -192,80 +153,124 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex }) =>
   </PlayerListContainer>
 );
 
-interface NotificationProps {
-  notification: NotificationState;
-}
-
-const Notification: React.FC<NotificationProps> = ({ notification }) => (
-  <NotificationContainer $visible={notification.visible}>
-    {notification.message}
-  </NotificationContainer>
-);
-
-interface CardComponentProps {
-  card: Card | null;
-  disabled?: boolean;
-  onClick?: () => void;
-  showAvatar?: boolean;
-  avatarSrc?: string;
-  transform?: string;
-  isBack?: boolean;
-}
-
-const CardComponent: React.FC<CardComponentProps> = ({ 
-  card, 
-  disabled = false, 
-  onClick, 
-  showAvatar = false, 
-  avatarSrc, 
-  transform,
-  isBack = false
-}) => (
-  <CardWrapper 
-    $disabled={disabled} 
-    $transform={transform}
-    onClick={disabled ? undefined : onClick}
-    $isButton={!!onClick}
-  >
-    {showAvatar && avatarSrc && (
-      <CardAvatar>
-        <img src={avatarSrc} alt="Player avatar" />
-      </CardAvatar>
-    )}
-    {isBack ? (
-      <CardBack>BRISCOLA</CardBack>
-    ) : card ? (
-      <CardImage src={card.imagePath} alt={card.name} />
-    ) : (
-      <CardPlaceholder>No Card</CardPlaceholder>
-    )}
-  </CardWrapper>
-);
-
 interface TrumpDisplayProps {
   trumpCard: Card | null;
-  deckCount: number;
+  deck: Card[];
 }
 
-const TrumpDisplay: React.FC<TrumpDisplayProps> = ({ trumpCard, deckCount }) => (
-  <TrumpContainer>
-    <TrumpTitle>Trump Card</TrumpTitle>
-    <TrumpCardArea>
-      <DeckIndicator>
-        <CardComponent card={null} isBack={true} />
-        <DeckCount>{deckCount} cards</DeckCount>
-      </DeckIndicator>
-      {trumpCard && (
-        <CardComponent card={trumpCard} />
+// Deck Stack Component
+interface DeckStackProps {
+  deck: Card[];
+  colors: any;
+}
+
+const DeckStack: React.FC<DeckStackProps> = ({ deck, colors }) => {
+  const maxVisibleCards = Math.min(6, deck.length);
+  
+  return (
+    <DeckStackContainer>
+      {Array.from({ length: maxVisibleCards }, (_, index) => (
+        <DeckCard
+          key={`deck-${index}`}
+          $zIndex={index}
+          $rotation={randomNumBetween(-2, 2)}
+          $offset={index * 0.3}
+        >
+          <CardComponent
+            card={null}
+            isBack={true}
+            colors={colors}
+            mobileBreakpoint={MOBILE_BREAKPOINT}
+            size="small"
+          />
+        </DeckCard>
+      ))}
+    </DeckStackContainer>
+  );
+};
+
+// Player Stack Component
+interface PlayerStackDisplayProps {
+  cards: Card[];
+  colors: any;
+}
+
+const PlayerStackDisplay: React.FC<PlayerStackDisplayProps> = ({ cards, colors }) => {
+  const maxVisibleCards = Math.min(5, cards.length);
+  
+  if (cards.length === 0) {
+    return (
+      <StackContainer>
+        <EmptyStack>No cards won</EmptyStack>
+      </StackContainer>
+    );
+  }
+
+  return (
+    <StackContainer>
+      {Array.from({ length: maxVisibleCards }, (_, index) => {
+        const cardIndex = Math.max(0, cards.length - maxVisibleCards + index);
+        const card = cards[cardIndex];
+        
+        return (
+          <StackCard
+            key={`stack-${cardIndex}`}
+            $zIndex={index}
+            $rotation={randomNumBetween(-3, 3)}
+            $offset={index * 0.5}
+          >
+            <CardComponent
+              card={card}
+              colors={colors}
+              mobileBreakpoint={MOBILE_BREAKPOINT}
+              size="tiny"
+            />
+          </StackCard>
+        );
+      })}
+      {cards.length > maxVisibleCards && (
+        <StackCounter>+{cards.length - maxVisibleCards} more</StackCounter>
       )}
-    </TrumpCardArea>
-    {trumpCard && (
-      <TrumpInfo>
-        <div>{trumpCard.name}</div>
-        <div>Trump Suit: {trumpCard.suit.charAt(0).toUpperCase() + trumpCard.suit.slice(1)}s</div>
-      </TrumpInfo>
-    )}
-  </TrumpContainer>
+    </StackContainer>
+  );
+};
+
+// Opponent Hand Component
+interface OpponentHandProps {
+  playerInfo: PlayerInfo;
+  cardCount: number;
+  stackCards: Card[];
+  colors: any;
+}
+
+const OpponentHand: React.FC<OpponentHandProps> = ({ playerInfo, cardCount, stackCards, colors }) => (
+  <OpponentHandContainer>
+    <OpponentInfo>
+      <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
+      <PlayerDetails>
+        <PlayerName>{playerInfo.username}</PlayerName>
+        <CardCount>{cardCount} in hand</CardCount>
+      </PlayerDetails>
+    </OpponentInfo>
+    <OpponentCards>
+      {Array.from({ length: cardCount }, (_, index) => (
+        <OpponentCard
+          key={`opponent-${playerInfo.id}-${index}`}
+          $index={index}
+          $rotation={randomNumBetween(-8, 8)}
+        >
+          <CardComponent
+            card={null}
+            isBack={true}
+            colors={colors}
+            mobileBreakpoint={MOBILE_BREAKPOINT}
+            size="small"
+          />
+        </OpponentCard>
+      ))}
+    </OpponentCards>
+    <PlayerStackDisplay cards={stackCards} colors={colors} />
+  </OpponentHandContainer>
 );
 
 // ===== MAIN GAME COMPONENT =====
@@ -277,70 +282,223 @@ const GameApp: React.FC = () => {
     deck: [],
     trumpCard: null,
     gameStarted: false,
-    isShuffling: false
+    isShuffling: false,
+    playerHands: {},
+    playerStacks: {},
+    cardsDealt: false,
+    currentRound: 1,
+    roundWinner: null,
+    isResolvingTrick: false,
+    gameOver: false,
+    finalScores: {},
+    gameWinner: null
   });
-  
-  const [notification, setNotification] = useState<NotificationState>({
-    message: '',
-    visible: false,
-    timestamp: 0
-  });
+
+  const { notification, showNotification } = useNotification();
 
   const currentPlayer = myPlayer();
   const currentPlayerIndex = players.findIndex(p => p.id === currentPlayer?.id);
   const isMyTurn = currentPlayerIndex === currentTurn;
   const isGameHost = isHost();
 
-  const showNotification = useCallback((message: string) => {
-    setNotification({
-      message,
-      visible: true,
-      timestamp: Date.now()
+  // Deal cards to players
+  const dealCards = useCallback((deck: Card[], players: PlayerState[]): { newDeck: Card[], hands: PlayerHand } => {
+    const newDeck = [...deck];
+    const hands: PlayerHand = {};
+
+    // Initialize empty hands
+    players.forEach(player => {
+      hands[player.id] = [];
     });
-    
-    setTimeout(() => {
-      setNotification(prev => ({ ...prev, visible: false }));
-    }, 3000);
+
+    // Deal cards to each player
+    for (let cardIndex = 0; cardIndex < CARDS_PER_PLAYER; cardIndex++) {
+      for (let playerIndex = 0; playerIndex < players.length; playerIndex++) {
+        if (newDeck.length > 0) {
+          const card = newDeck.pop()!;
+          hands[players[playerIndex].id].push(card);
+        }
+      }
+    }
+
+    return { newDeck, hands };
   }, []);
 
   const initializeGame = useCallback(async () => {
-  if (!isGameHost || gameState.gameStarted) return;
+    if (!isGameHost || gameState.gameStarted) return;
 
-  showNotification("Host is shuffling the deck...");
-  setGameState({ ...gameState, isShuffling: true });
+    showNotification("Host is shuffling the deck...", NotificationType.INFO);
+    setGameState({ ...gameState, isShuffling: true });
 
-  // Simulate shuffling delay
-  await sleep(2000);
+    await sleep(2000);
 
-  const newDeck = shuffleDeck(createDeck());
-  const trumpCard = newDeck.pop()!; // Remove trump card from deck
+    const fullDeck = shuffleDeck(createDeck());
+    const trumpCard = fullDeck.pop()!; // Remove trump card from deck
+    
+    // Deal cards to players
+    const { newDeck, hands } = dealCards(fullDeck, players);
 
-  setGameState({
-    deck: newDeck,
-    trumpCard,
-    gameStarted: true,
-    isShuffling: false
-  });
+    // Initialize empty stacks for all players
+    const stacks: PlayerStack = {};
+    players.forEach(player => {
+      stacks[player.id] = [];
+    });
 
-  showNotification(`Game started! Trump suit: ${trumpCard.suit}s`);
-}, [isGameHost, gameState, setGameState, showNotification]);
+    setGameState({
+      deck: newDeck,
+      trumpCard,
+      gameStarted: true,
+      isShuffling: false,
+      playerHands: hands,
+      playerStacks: stacks,
+      cardsDealt: true,
+      currentRound: 1,
+      roundWinner: null,
+      isResolvingTrick: false,
+      gameOver: false,
+      finalScores: {},
+      gameWinner: null
+    });
+
+    showNotification(`Game started! Trump suit: ${trumpCard.suit}s`, NotificationType.SUCCESS);
+    showNotification(`Cards dealt! Each player has ${CARDS_PER_PLAYER} cards`, NotificationType.INFO);
+  }, [isGameHost, gameState, setGameState, showNotification, dealCards, players]);
+
+  const resolveTrick = useCallback(async () => {
+    if (!isGameHost || playedCards.length !== players.length) return;
+
+    setGameState({ ...gameState, isResolvingTrick: true });
+    
+    // Determine round winner
+    const winnerId = evaluateRound(playedCards, gameState.trumpCard?.suit || 'coin' as Suit);
+    const winner = players.find(p => p.id === winnerId);
+    const winnerInfo = winner ? extractPlayerInfo(winner) : null;
+
+    showNotification(`${winnerInfo?.username || 'Someone'} wins the round!`, NotificationType.SUCCESS);
+
+    await sleep(2000);
+
+    // Add all played cards to winner's stack
+    const newPlayerStacks = { ...gameState.playerStacks };
+    if (!newPlayerStacks[winnerId]) {
+      newPlayerStacks[winnerId] = [];
+    }
+    newPlayerStacks[winnerId].push(...playedCards.map(pc => pc.card));
+
+    // Clear played cards
+    setPlayedCards([]);
+
+    // Always try to draw cards if deck has cards available
+    let newDeck = [...gameState.deck];
+    let newHands = { ...gameState.playerHands };
+    
+    if (newDeck.length > 0) {
+      // Each player draws one card if they have less than 3 cards
+      for (let playerIndex = 0; playerIndex < players.length; playerIndex++) {
+        const playerId = players[playerIndex].id;
+        if (newDeck.length > 0 && newHands[playerId].length < CARDS_PER_PLAYER) {
+          const card = newDeck.pop()!;
+          newHands[playerId].push(card);
+        }
+      }
+    }
+
+    // Check if game should end
+    const allHandsEmpty = Object.values(newHands).every(hand => hand.length === 0);
+    const deckEmpty = newDeck.length === 0;
+
+    if (allHandsEmpty && deckEmpty) {
+      // Game is over - evaluate final scores
+      showNotification("All cards played! Calculating final scores...", NotificationType.INFO);
+      
+      await sleep(1000);
+      
+      const { scores, winner: gameWinnerId } = evaluateGame(newPlayerStacks);
+      const gameWinner = players.find(p => p.id === gameWinnerId);
+      const gameWinnerInfo = gameWinner ? extractPlayerInfo(gameWinner) : null;
+
+      const finalGameState = {
+        ...gameState,
+        playerStacks: newPlayerStacks,
+        playerHands: newHands,
+        deck: newDeck,
+        currentRound: gameState.currentRound + 1,
+        roundWinner: winnerId,
+        isResolvingTrick: false,
+        gameOver: true,
+        finalScores: scores,
+        gameWinner: gameWinnerId
+      };
+
+      setGameState(finalGameState);
+
+      await sleep(1000);
+      
+      showNotification(`Game Over! ${gameWinnerInfo?.username} wins with ${scores[gameWinnerId]} points!`, NotificationType.SUCCESS);
+    } else {
+      // Continue game - set up next round
+      const updatedGameState = {
+        ...gameState,
+        playerStacks: newPlayerStacks,
+        playerHands: newHands,
+        deck: newDeck,
+        currentRound: gameState.currentRound + 1,
+        roundWinner: winnerId,
+        isResolvingTrick: false
+      };
+
+      setGameState(updatedGameState);
+      
+      // Winner of the round starts the next round
+      const winnerIndex = players.findIndex(p => p.id === winnerId);
+      setCurrentTurn(winnerIndex);
+
+      if (newDeck.length > 0) {
+        showNotification(`Round ${gameState.currentRound} complete! Cards drawn. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
+      } else {
+        showNotification(`Round ${gameState.currentRound} complete! No more cards to draw. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
+      }
+    }
+  }, [isGameHost, playedCards, players, gameState, setGameState, setPlayedCards, setCurrentTurn, showNotification]);
 
   const handleCardPlay = useCallback((card: Card) => {
-    if (!isMyTurn || !currentPlayer || !gameState.gameStarted) {
-      showNotification("It's not your turn or game hasn't started!");
+    if (!isMyTurn || !currentPlayer || !gameState.gameStarted || gameState.isResolvingTrick) {
+      showNotification("It's not your turn or game is being resolved!", NotificationType.WARNING);
       return;
     }
+
+    const currentPlayerHand = gameState.playerHands[currentPlayer.id] || [];
+    const cardIndex = currentPlayerHand.findIndex(c => c.id === card.id);
     
+    if (cardIndex === -1) {
+      showNotification("You don't have that card!", NotificationType.ERROR);
+      return;
+    }
+
+    // Remove card from player's hand
+    const newPlayerHands = { ...gameState.playerHands };
+    newPlayerHands[currentPlayer.id] = currentPlayerHand.filter(c => c.id !== card.id);
+
     const newPlayedCard: PlayedCardData = {
       card,
       playerId: currentPlayer.id,
       transform: generateRandomTransform()
     };
-    
-    setPlayedCards([...playedCards, newPlayedCard]);
+
+    const newPlayedCards = [...playedCards, newPlayedCard];
+    setPlayedCards(newPlayedCards);
     setCurrentTurn((currentTurn + 1) % players.length);
-    showNotification(`You played ${card.name}`);
-  }, [isMyTurn, currentPlayer, gameState.gameStarted, playedCards, currentTurn, players.length, setPlayedCards, setCurrentTurn, showNotification]);
+    setGameState({ ...gameState, playerHands: newPlayerHands });
+    
+    showNotification(`You played ${card.name}`, NotificationType.SUCCESS);
+
+    // Check if trick is complete (all players have played)
+    if (newPlayedCards.length === players.length) {
+      setTimeout(() => {
+        resolveTrick();
+      }, 1000);
+    }
+  }, [isMyTurn, currentPlayer, gameState, playedCards, currentTurn, players.length, setPlayedCards, setCurrentTurn, setGameState, showNotification, resolveTrick]);
 
   // Initialize game when host and players are ready
   useEffect(() => {
@@ -356,42 +514,171 @@ const GameApp: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onPlayerJoin((playerState) => {
       const playerInfo = extractPlayerInfo(playerState);
-      showNotification(`${playerInfo.username} joined the game!`);
-      
+      showNotification(`${playerInfo.username} joined the game!`, NotificationType.INFO);
+
       playerState.onQuit(() => {
-        showNotification(`${playerInfo.username} left the game!`);
+        showNotification(`${playerInfo.username} left the game!`, NotificationType.ERROR);
       });
     });
 
     return unsubscribe;
   }, [showNotification]);
 
-  // Mock player hand for demonstration
-  const playerHand = gameState.gameStarted ? [
-    createDeck()[0], createDeck()[1], createDeck()[2]
-  ] : [];
+  // Get current player's hand and stack
+  const currentPlayerHand = currentPlayer ? (gameState.playerHands[currentPlayer.id] || []) : [];
+  const currentPlayerStack = currentPlayer ? (gameState.playerStacks[currentPlayer.id] || []) : [];
+  
+  // Get opponents (players other than current player)
+  const opponents = players.filter(p => p.id !== currentPlayer?.id);
+
+  const cardColors = {
+    cardBg: COLORS.cardBg,
+    cardBorder: COLORS.cardBorder,
+    primary: COLORS.primary,
+    secondary: COLORS.secondary,
+    text: COLORS.text,
+    textSecondary: COLORS.textSecondary,
+    surface: COLORS.surface
+  };
+
+  const notificationColors = {
+    surface: COLORS.surface,
+    text: COLORS.text,
+    accent: COLORS.accent,
+    success: COLORS.success,
+    error: COLORS.error,
+    textSecondary: COLORS.textSecondary
+  };
 
   return (
     <GameContainer>
       <GlobalStyle />
-      
-      <PlayerList players={players} currentTurnIndex={currentTurn} />
-      
-      <Notification notification={notification} />
-      
-      <TrumpDisplay trumpCard={gameState.trumpCard} deckCount={gameState.deck.length} />
-      
+
+      <Notification 
+        notification={notification} 
+        colors={notificationColors}
+        position="top"
+      />
+
+      {/* Mobile Header */}
+      <MobileHeader>
+        <MobilePlayerSection>
+          <MobileSectionTitle>Players</MobileSectionTitle>
+          <MobilePlayerList>
+            {players.map((player, index) => {
+              const playerInfo = extractPlayerInfo(player);
+              const isCurrentTurn = index === currentTurn;
+              const stackCount = gameState.playerStacks[player.id]?.length || 0;
+              const finalScore = gameState.finalScores[player.id];
+              return (
+                <MobilePlayerItem key={playerInfo.id} $isCurrentTurn={isCurrentTurn}>
+                  <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
+                  <MobilePlayerName>{playerInfo.username}</MobilePlayerName>
+                  {gameState.gameOver ? (
+                    <MobileFinalScore $isWinner={gameState.gameWinner === player.id}>
+                      {finalScore} pts
+                    </MobileFinalScore>
+                  ) : (
+                    <MobileStackCount>{stackCount}</MobileStackCount>
+                  )}
+                  {isCurrentTurn && !gameState.gameOver && <TurnIndicator>●</TurnIndicator>}
+                  {gameState.gameWinner === player.id && <WinnerCrown>👑</WinnerCrown>}
+                </MobilePlayerItem>
+              );
+            })}
+          </MobilePlayerList>
+        </MobilePlayerSection>
+
+        <MobileDeckSection>
+          <MobileSectionTitle>Deck</MobileSectionTitle>
+          <DeckStack deck={gameState.deck} colors={cardColors} />
+          <DeckCount>{gameState.deck.length} cards</DeckCount>
+        </MobileDeckSection>
+
+        <MobileTrumpSection>
+          <MobileSectionTitle>Trump</MobileSectionTitle>
+          {gameState.trumpCard ? (
+            <>
+              <CardComponent
+                card={gameState.trumpCard}
+                colors={cardColors}
+                mobileBreakpoint={MOBILE_BREAKPOINT}
+                size="small"
+              />
+              <TrumpSuitInfo>
+                {gameState.trumpCard.suit.charAt(0).toUpperCase() + gameState.trumpCard.suit.slice(1)}s
+              </TrumpSuitInfo>
+            </>
+          ) : (
+            <EmptyTrumpMessage>No Trump</EmptyTrumpMessage>
+          )}
+        </MobileTrumpSection>
+      </MobileHeader>
+
+      {/* Desktop Sidebar */}
+      <DesktopPlayerList players={players} currentTurnIndex={currentTurn} playerStacks={gameState.playerStacks} />
+
+      {/* Desktop Trump Display */}
+      <DesktopTrumpDisplay trumpCard={gameState.trumpCard} deck={gameState.deck} />
+
       <PlayAreaContainer>
+        {/* Opponent Hands */}
+        <OpponentHandsContainer>
+          {opponents.map(opponent => {
+            const playerInfo = extractPlayerInfo(opponent);
+            const opponentHand = gameState.playerHands[opponent.id] || [];
+            const opponentStack = gameState.playerStacks[opponent.id] || [];
+            return (
+              <OpponentHand
+                key={opponent.id}
+                playerInfo={playerInfo}
+                cardCount={opponentHand.length}
+                stackCards={opponentStack}
+                colors={cardColors}
+              />
+            );
+          })}
+        </OpponentHandsContainer>
+
         {gameState.isShuffling && (
           <ShufflingIndicator>
             <ShufflingText>Shuffling...</ShufflingText>
           </ShufflingIndicator>
         )}
-        
+
+        {gameState.isResolvingTrick && (
+          <ResolvingIndicator>
+            <ResolvingText>Resolving round...</ResolvingText>
+          </ResolvingIndicator>
+        )}
+
+        {gameState.gameOver && (
+          <GameOverDisplay>
+            <GameOverTitle>Game Over!</GameOverTitle>
+            <FinalScoresContainer>
+              {players.map(player => {
+                const playerInfo = extractPlayerInfo(player);
+                const score = gameState.finalScores[player.id] || 0;
+                const isWinner = gameState.gameWinner === player.id;
+                return (
+                  <FinalScoreItem key={player.id} $isWinner={isWinner}>
+                    <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
+                    <FinalScoreDetails>
+                      <PlayerName>{playerInfo.username}</PlayerName>
+                      <FinalScore>{score} points</FinalScore>
+                    </FinalScoreDetails>
+                    {isWinner && <WinnerCrown>👑</WinnerCrown>}
+                  </FinalScoreItem>
+                );
+              })}
+            </FinalScoresContainer>
+          </GameOverDisplay>
+        )}
+
         {playedCards.map((playedCard, index) => {
           const player = players.find(p => p.id === playedCard.playerId);
           const playerInfo = player ? extractPlayerInfo(player) : null;
-          
+
           return (
             <PlayedCardContainer key={`${playedCard.playerId}-${index}`}>
               <CardComponent
@@ -399,34 +686,116 @@ const GameApp: React.FC = () => {
                 showAvatar={true}
                 avatarSrc={playerInfo?.avatar}
                 transform={playedCard.transform}
+                colors={cardColors}
+                mobileBreakpoint={MOBILE_BREAKPOINT}
               />
             </PlayedCardContainer>
           );
         })}
       </PlayAreaContainer>
-      
+
       <HandContainer>
         {!gameState.gameStarted ? (
           <WaitingMessage>
-            {isGameHost ? 
-              `Waiting for players... (${players.length}/4)` : 
+            {isGameHost ?
+              `Waiting for players... (${players.length}/4)` :
               "Waiting for host to start the game..."
             }
           </WaitingMessage>
+        ) : gameState.gameOver ? (
+          <GameOverMessage>
+            Game Complete! Check the final scores above.
+          </GameOverMessage>
         ) : (
-          playerHand.map((card, index) => (
-            <CardComponent
-              key={card.id}
-              card={card}
-              disabled={!isMyTurn}
-              onClick={() => handleCardPlay(card)}
-            />
-          ))
+          <>
+            <HandCards>
+              {currentPlayerHand.map((card, index) => (
+                <CardComponent
+                  key={card.id}
+                  card={card}
+                  disabled={!isMyTurn || gameState.isResolvingTrick}
+                  onClick={() => handleCardPlay(card)}
+                  colors={cardColors}
+                  mobileBreakpoint={MOBILE_BREAKPOINT}
+                />
+              ))}
+            </HandCards>
+            <PlayerStackContainer>
+              <StackTitle>Your Stack ({currentPlayerStack.length} cards)</StackTitle>
+              <PlayerStackDisplay cards={currentPlayerStack} colors={cardColors} />
+            </PlayerStackContainer>
+          </>
         )}
       </HandContainer>
     </GameContainer>
   );
 };
+
+// Update the PlayerList component for desktop
+const DesktopPlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex, playerStacks }) => (
+  <DesktopPlayerListContainer>
+    <PlayerListTitle>Players ({players.length})</PlayerListTitle>
+    {players.map((player, index) => {
+      const playerInfo = extractPlayerInfo(player);
+      const isCurrentTurn = index === currentTurnIndex;
+      const stackCount = playerStacks[player.id]?.length || 0;
+
+      return (
+        <PlayerItem key={playerInfo.id} $isCurrentTurn={isCurrentTurn}>
+          <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
+          <PlayerDetails>
+            <PlayerName>{playerInfo.username}</PlayerName>
+            <StackCount>{stackCount} cards won</StackCount>
+          </PlayerDetails>
+          {isCurrentTurn && <TurnIndicator>●</TurnIndicator>}
+        </PlayerItem>
+      );
+    })}
+  </DesktopPlayerListContainer>
+);
+
+// Desktop Trump Display component
+const DesktopTrumpDisplay: React.FC<TrumpDisplayProps> = ({ trumpCard, deck }) => (
+  <DesktopTrumpContainer>
+    <TrumpTitle>Deck</TrumpTitle>
+    <TrumpCardArea>
+      <DeckIndicator>
+        <DeckStack deck={deck} colors={{
+          cardBg: COLORS.cardBg,
+          cardBorder: COLORS.cardBorder,
+          primary: COLORS.primary,
+          secondary: COLORS.secondary,
+          text: COLORS.text,
+          textSecondary: COLORS.textSecondary,
+          surface: COLORS.surface
+        }} />
+        <DeckCount>{deck.length} cards</DeckCount>
+      </DeckIndicator>
+      {trumpCard && (
+        <CardComponent
+          card={trumpCard}
+          colors={{
+            cardBg: COLORS.cardBg,
+            cardBorder: COLORS.cardBorder,
+            primary: COLORS.primary,
+            secondary: COLORS.secondary,
+            text: COLORS.text,
+            textSecondary: COLORS.textSecondary,
+            surface: COLORS.surface
+          }}
+          mobileBreakpoint={MOBILE_BREAKPOINT}
+          size="small"
+        />
+      )}
+    </TrumpCardArea>
+    {trumpCard && (
+      <TrumpInfo>
+        <div>{trumpCard.name}</div>
+        <div>Trump Suit: {trumpCard.suit.charAt(0).toUpperCase() + trumpCard.suit.slice(1)}s</div>
+      </TrumpInfo>
+    )}
+  </DesktopTrumpContainer>
+);
 
 // ===== MAIN COMPONENT =====
 export default function Home() {
@@ -436,7 +805,7 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       (window as any)._USETEMPSTORAGE = true;
     }
-    
+
     insertCoin().then(() => {
       setGameStarted(true);
     });
@@ -480,13 +849,6 @@ const slideUp = keyframes`
   }
 `;
 
-const fadeInOut = keyframes`
-  0% { opacity: 0; transform: translateY(-20px); }
-  10% { opacity: 1; transform: translateY(0); }
-  90% { opacity: 1; transform: translateY(0); }
-  100% { opacity: 0; transform: translateY(-20px); }
-`;
-
 const shuffle = keyframes`
   0% { transform: rotate(0deg) scale(1); }
   25% { transform: rotate(5deg) scale(1.1); }
@@ -495,45 +857,60 @@ const shuffle = keyframes`
   100% { transform: rotate(0deg) scale(1); }
 `;
 
+const pulse = keyframes`
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+`;
+
 // ===== STYLED COMPONENTS =====
 const GlobalStyle = createGlobalStyle`
   body {
     background-color: ${COLORS.background};
     color: ${COLORS.text};
     margin: 0;
+    padding: 0;
     overflow: hidden;
     user-select: none;
     font-family: 'Arial', sans-serif;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  html {
+    height: 100vh;
+    width: 100vw;
   }
 `;
 
 const GameContainer = styled.div`
-  position: absolute;
+  position: fixed;
   top: 0;
   bottom: 0;
   left: 0;
   right: 0;
+  height: 100vh;
+  width: 100vw;
   background-color: ${COLORS.background};
+  
+  /* Desktop Layout - Dashboard Style */
   display: grid;
   grid-template-areas: 
-    "players notification trump"
-    "players play-area trump"
-    "players hand trump";
-  grid-template-columns: 200px 1fr 200px;
-  grid-template-rows: auto 1fr auto;
+    "players play-area trump";
+  grid-template-columns: 250px 1fr 250px;
+  grid-template-rows: 1fr;
   gap: 1rem;
   padding: 1rem;
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
+    /* Mobile Layout - Header + Play Area */
     grid-template-areas: 
-      "notification"
-      "trump"
-      "play-area"
-      "hand"
-      "players";
+      "header"
+      "play-area";
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto auto;
-    padding: 0.5rem;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    padding: 0;
   }
 `;
 
@@ -542,9 +919,372 @@ const LoadingScreen = styled.div`
   justify-content: center;
   align-items: center;
   height: 100vh;
+  width: 100vw;
   background-color: ${COLORS.background};
   color: ${COLORS.text};
   font-size: 1.5rem;
+  position: fixed;
+  top: 0;
+  left: 0;
+`;
+
+/* ===== DECK STACK COMPONENTS ===== */
+const DeckStackContainer = styled.div`
+  position: relative;
+  width: 50px;
+  height: 70px;
+  margin: 0 auto;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    width: 40px;
+    height: 55px;
+  }
+`;
+
+const DeckCard = styled.div<{ $zIndex: number; $rotation: number; $offset: number }>`
+  position: absolute;
+  top: ${props => props.$offset}px;
+  left: ${props => props.$offset}px;
+  z-index: ${props => props.$zIndex};
+  transform: rotate(${props => props.$rotation}deg);
+  transition: all 0.2s ease;
+`;
+
+/* ===== STACK COMPONENTS ===== */
+const StackContainer = styled.div`
+  position: relative;
+  width: 60px;
+  height: 50px;
+  margin-top: 0.5rem;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    width: 50px;
+    height: 40px;
+  }
+`;
+
+const StackCard = styled.div<{ $zIndex: number; $rotation: number; $offset: number }>`
+  position: absolute;
+  top: ${props => props.$offset}px;
+  left: ${props => props.$offset}px;
+  z-index: ${props => props.$zIndex};
+  transform: rotate(${props => props.$rotation}deg);
+`;
+
+const StackCounter = styled.div`
+  position: absolute;
+  bottom: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  color: ${COLORS.textSecondary};
+  background-color: ${COLORS.surface};
+  padding: 2px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+`;
+
+const EmptyStack = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: 2px dashed ${COLORS.surface};
+  border-radius: 0.5rem;
+  font-size: 0.6rem;
+  color: ${COLORS.textSecondary};
+  text-align: center;
+`;
+
+/* ===== OPPONENT HAND COMPONENTS ===== */
+const OpponentHandsContainer = styled.div`
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2rem;
+  z-index: 50;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    top: 1rem;
+    gap: 1rem;
+    flex-direction: column;
+    align-items: center;
+  }
+`;
+
+const OpponentHandContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: ${COLORS.glassBg};
+  border-radius: 1rem;
+  padding: 1rem;
+  backdrop-filter: blur(10px);
+  border: 1px solid ${COLORS.surface};
+  min-width: 180px;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    min-width: 140px;
+    padding: 0.5rem;
+    flex-direction: row;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+`;
+
+const OpponentInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    margin-bottom: 0;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+`;
+
+const OpponentCards = styled.div`
+  display: flex;
+  gap: -8px;
+  position: relative;
+  margin-bottom: 0.5rem;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    gap: -4px;
+    margin-bottom: 0;
+  }
+`;
+
+const OpponentCard = styled.div<{ $index: number; $rotation: number }>`
+  position: relative;
+  z-index: ${props => props.$index};
+  transform: rotate(${props => props.$rotation}deg) translateX(${props => props.$index * -6}px);
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: rotate(${props => props.$rotation}deg) translateX(${props => props.$index * -6}px) translateY(-3px);
+  }
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    transform: rotate(${props => props.$rotation}deg) translateX(${props => props.$index * -4}px);
+    
+    &:hover {
+      transform: rotate(${props => props.$rotation}deg) translateX(${props => props.$index * -4}px) translateY(-2px);
+    }
+  }
+`;
+
+const PlayerDetails = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+`;
+
+const StackCount = styled.span`
+  font-size: 0.7rem;
+  color: ${COLORS.textSecondary};
+  font-weight: 400;
+`;
+
+const CardCount = styled.span`
+  font-size: 0.7rem;
+  color: ${COLORS.textSecondary};
+  font-weight: 500;
+`;
+
+/* ===== MOBILE COMPONENTS ===== */
+const MobileHeader = styled.div`
+  display: none;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    display: flex;
+    grid-area: header;
+    background: linear-gradient(135deg, ${COLORS.glassBg}, rgba(255, 255, 255, 0.05));
+    border-radius: 1rem;
+    margin: 0.5rem;
+    padding: 1rem;
+    gap: 1rem;
+    backdrop-filter: blur(10px);
+    border: 2px solid ${COLORS.surface};
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    overflow-x: auto;
+  }
+`;
+
+const MobilePlayerSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 2;
+  min-width: 0;
+`;
+
+const MobileStackCount = styled.span`
+  font-size: 0.7rem;
+  color: ${COLORS.textSecondary};
+  font-weight: 500;
+  margin-top: 0.25rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+`;
+
+const WaitingMessage = styled.div`
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); 
+  background-color: ${COLORS.surface};
+  color: ${COLORS.text};
+  padding: 1rem 2rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  font-size: 1rem;
+  text-align: center;
+  z-index: 100;
+  animation: ${slideUp} 1s ease-out forwards;
+`;
+
+
+
+const MobileDeckSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 80px;
+`;
+
+const MobileTrumpSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 80px;
+`;
+
+const MobileSectionTitle = styled.h4`
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  color: ${COLORS.textSecondary};
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const MobilePlayerList = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  width: 100%;
+  padding: 0.25rem;
+  
+  &::-webkit-scrollbar {
+    height: 3px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: ${COLORS.accent};
+    border-radius: 3px;
+  }
+`;
+
+const MobilePlayerItem = styled.div<{ $isCurrentTurn: boolean }>`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  min-width: 60px;
+  background-color: ${props => props.$isCurrentTurn ? COLORS.surface : 'rgba(255, 255, 255, 0.05)'};
+  border: ${props => props.$isCurrentTurn ? `2px solid ${COLORS.accent}` : '2px solid transparent'};
+  transition: all 0.2s ease;
+  position: relative;
+
+  &:hover {
+    background-color: ${props => props.$isCurrentTurn ? COLORS.surface : 'rgba(255, 255, 255, 0.1)'};
+  }
+`;
+
+const MobilePlayerName = styled.span`
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+`;
+
+const DeckCount = styled.span`
+  font-size: 0.7rem;
+  color: ${COLORS.textSecondary};
+  margin-top: 0.25rem;
+  text-align: center;
+`;
+
+const TrumpSuitInfo = styled.div`
+  font-size: 0.7rem;
+  color: ${COLORS.accent};
+  font-weight: bold;
+  margin-top: 0.25rem;
+  text-align: center;
+`;
+
+const EmptyTrumpMessage = styled.div`
+  font-size: 0.7rem;
+  color: ${COLORS.textSecondary};
+  text-align: center;
+  padding: 1rem 0;
+  font-style: italic;
+`;
+
+const DesktopPlayerListContainer = styled.div`
+  grid-area: players;
+  background-color: ${COLORS.glassBg};
+  border-radius: 1rem;
+  padding: 1.5rem;
+  backdrop-filter: blur(10px);
+  border: 2px solid ${COLORS.primary};
+  height: 100%;
+  overflow-y: auto;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    display: none;
+  }
+`;
+
+const DesktopTrumpContainer = styled.div`
+  grid-area: trump;
+  background-color: ${COLORS.glassBg};
+  border-radius: 1rem;
+  padding: 1.5rem;
+  backdrop-filter: blur(10px);
+  border: 2px solid ${COLORS.accent};
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    display: none;
+  }
 `;
 
 const PlayerListContainer = styled.div`
@@ -554,10 +1294,19 @@ const PlayerListContainer = styled.div`
   padding: 1rem;
   backdrop-filter: blur(10px);
   border: 1px solid ${COLORS.surface};
+  height: fit-content;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
-    max-height: 150px;
-    overflow-y: auto;
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    width: 180px;
+    max-height: 200px;
+    z-index: 100;
+    font-size: 0.9rem;
+    padding: 0.75rem;
   }
 `;
 
@@ -566,6 +1315,11 @@ const PlayerListTitle = styled.h3`
   font-size: 1.2rem;
   text-align: center;
   color: ${COLORS.textSecondary};
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 1rem;
+    margin: 0 0 0.5rem 0;
+  }
 `;
 
 const PlayerItem = styled.div<{ $isCurrentTurn: boolean }>`
@@ -577,39 +1331,59 @@ const PlayerItem = styled.div<{ $isCurrentTurn: boolean }>`
   margin-bottom: 0.5rem;
   background-color: ${props => props.$isCurrentTurn ? COLORS.surface : 'transparent'};
   border: ${props => props.$isCurrentTurn ? `2px solid ${COLORS.accent}` : '2px solid transparent'};
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    gap: 0.5rem;
+    padding: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
 `;
 
 const PlayerAvatar = styled.img`
-  width: 2rem;
-  height: 2rem;
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: 50%;
   object-fit: cover;
+  border: 2px solid ${COLORS.accent};
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    width: 2rem;
+    height: 2rem;
+    border-width: 1px;
+  }
 `;
 
 const PlayerName = styled.span`
   flex: 1;
   font-weight: 500;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 0.8rem;
+  }
 `;
 
 const TurnIndicator = styled.span`
   color: ${COLORS.accent};
-  font-size: 1.2rem;
-`;
+  font-size: 1.5rem;
+  animation: pulse 1.5s infinite;
 
-const NotificationContainer = styled.div<{ $visible: boolean }>`
-  grid-area: notification;
-  display: ${props => props.$visible ? 'flex' : 'none'};
-  justify-content: center;
-  align-items: center;
-  background-color: ${COLORS.surface};
-  color: ${COLORS.text};
-  padding: 1rem 2rem;
-  border-radius: 0.5rem;
-  animation: ${props => props.$visible ? fadeInOut : 'none'} 3s ease-in-out;
-  z-index: 1000;
-  margin: 0 auto;
-  max-width: 400px;
-  border: 1px solid ${COLORS.accent};
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 0.8rem;
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: ${COLORS.accent};
+    color: ${COLORS.primary};
+    border-radius: 50%;
+    width: 15px;
+    height: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    border: 2px solid ${COLORS.background};
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
 `;
 
 const TrumpContainer = styled.div`
@@ -622,12 +1396,27 @@ const TrumpContainer = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
+  height: fit-content;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    width: 120px;
+    padding: 0.5rem;
+    z-index: 100;
+  }
 `;
 
 const TrumpTitle = styled.h3`
   margin: 0 0 1rem 0;
   font-size: 1.2rem;
   color: ${COLORS.textSecondary};
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 0.9rem;
+    margin: 0 0 0.5rem 0;
+  }
 `;
 
 const TrumpCardArea = styled.div`
@@ -635,6 +1424,10 @@ const TrumpCardArea = styled.div`
   flex-direction: column;
   align-items: center;
   gap: 1rem;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    gap: 0.5rem;
+  }
 `;
 
 const DeckIndicator = styled.div`
@@ -642,11 +1435,10 @@ const DeckIndicator = styled.div`
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-`;
 
-const DeckCount = styled.span`
-  font-size: 0.9rem;
-  color: ${COLORS.textSecondary};
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    gap: 0.25rem;
+  }
 `;
 
 const TrumpInfo = styled.div`
@@ -665,6 +1457,19 @@ const TrumpInfo = styled.div`
     font-size: 0.9rem;
     color: ${COLORS.textSecondary};
   }
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    margin-top: 0.5rem;
+    
+    div:first-child {
+      font-size: 0.7rem;
+      margin-bottom: 0.1rem;
+    }
+    
+    div:last-child {
+      font-size: 0.6rem;
+    }
+  }
 `;
 
 const PlayAreaContainer = styled.div`
@@ -673,10 +1478,15 @@ const PlayAreaContainer = styled.div`
   align-items: center;
   justify-content: center;
   position: relative;
-  min-height: 200px;
   background-color: ${COLORS.glassBg};
   border-radius: 1rem;
   border: 1px solid ${COLORS.surface};
+  height: 100%;
+  width: 100%;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    margin-top: 0;
+  }
 `;
 
 const PlayedCardContainer = styled.div`
@@ -695,109 +1505,170 @@ const ShufflingText = styled.span`
   font-size: 1.5rem;
   color: ${COLORS.accent};
   font-weight: bold;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 1.2rem;
+  }
+`;
+
+const ResolvingIndicator = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: ${pulse} 1s infinite;
+`;
+
+const ResolvingText = styled.span`
+  font-size: 1.3rem;
+  color: ${COLORS.success};
+  font-weight: bold;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 1.1rem;
+  }
 `;
 
 const HandContainer = styled.div`
-  grid-area: hand;
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  z-index: 200;
+  background-color: ${COLORS.glassBg};
+  padding: 1rem;
+  border-radius: 1rem;
+  backdrop-filter: blur(10px);
+  border: 1px solid ${COLORS.surface};
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    bottom: 0.5rem;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    left: 1rem;
+    right: 1rem;
+    transform: none;
+    max-width: none;
+    width: calc(100vw - 2rem);
+  }
+`;
+
+const HandCards = styled.div`
   display: flex;
   justify-content: center;
   gap: 1rem;
-  padding: 1rem 0;
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
     gap: 0.5rem;
-    padding: 0.5rem 0;
   }
 `;
 
-const WaitingMessage = styled.div`
+const PlayerStackContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+const StackTitle = styled.h4`
+  margin: 0;
+  font-size: 0.9rem;
   color: ${COLORS.textSecondary};
+  text-align: center;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 0.8rem;
+  }
+`;
+
+/* ===== NEW STYLED COMPONENTS ===== */
+const MobileFinalScore = styled.span<{ $isWinner: boolean }>`
+  font-size: 0.7rem;
+  color: ${props => props.$isWinner ? COLORS.accent : COLORS.textSecondary};
+  font-weight: ${props => props.$isWinner ? 'bold' : '500'};
+  margin-top: 0.25rem;
+  text-align: center;
+`;
+
+const WinnerCrown = styled.span`
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  font-size: 1.2rem;
+  z-index: 10;
+`;
+
+const GameOverDisplay = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: ${COLORS.glassBg};
+  border-radius: 1rem;
+  padding: 2rem;
+  backdrop-filter: blur(10px);
+  border: 2px solid ${COLORS.accent};
+  max-width: 400px;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    padding: 1rem;
+    max-width: 300px;
+  }
+`;
+
+const GameOverTitle = styled.h2`
+  margin: 0 0 1.5rem 0;
+  font-size: 2rem;
+  color: ${COLORS.accent};
+  text-align: center;
+  
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 1.5rem;
+    margin: 0 0 1rem 0;
+  }
+`;
+
+const FinalScoresContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+`;
+
+const FinalScoreItem = styled.div<{ $isWinner: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background-color: ${props => props.$isWinner ? COLORS.surface : 'rgba(255, 255, 255, 0.05)'};
+  border: ${props => props.$isWinner ? `2px solid ${COLORS.accent}` : '2px solid transparent'};
+  position: relative;
+`;
+
+const FinalScoreDetails = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+`;
+
+const FinalScore = styled.span`
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: ${COLORS.accent};
+`;
+
+const GameOverMessage = styled.div`
+  color: ${COLORS.accent};
   font-size: 1.2rem;
   text-align: center;
   padding: 2rem;
-`;
-
-const CardWrapper = styled.div<{ 
-  $disabled?: boolean; 
-  $transform?: string; 
-  $isButton?: boolean;
-}>`
-  background: ${COLORS.cardBg};
-  border: 3px solid ${COLORS.cardBorder};
-  border-radius: ${props => props.$isButton ? '0.8rem' : '1.2rem'};
-  padding: ${props => props.$isButton ? '0.5rem' : '1rem'};
-  position: relative;
-  width: ${props => props.$isButton ? '5rem' : '8rem'};
-  height: ${props => props.$isButton ? '7rem' : '12rem'};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: ${props => props.$disabled ? 'not-allowed' : props.$isButton ? 'pointer' : 'default'};
-  opacity: ${props => props.$disabled ? 0.5 : 1};
-  transform: ${props => props.$transform || 'none'};
-  box-shadow: ${props => props.$isButton ? '0px 0.4rem 0px rgba(0, 0, 0, 0.25)' : 'none'};
-
-  &:hover {
-    transform: ${props => 
-      props.$disabled ? props.$transform || 'none' : 
-      props.$isButton ? `${props.$transform || ''} translateY(-2px)`.trim() : 
-      props.$transform || 'none'
-    };
-  }
+  font-weight: bold;
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
-    width: ${props => props.$isButton ? '4rem' : '6rem'};
-    height: ${props => props.$isButton ? '5.5rem' : '9rem'};
-    padding: ${props => props.$isButton ? '0.3rem' : '0.8rem'};
-  }
-`;
-
-const CardImage = styled.img`
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 0.4rem;
-`;
-
-const CardBack = styled.div`
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(45deg, ${COLORS.primary}, ${COLORS.secondary});
-  border-radius: 0.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: ${COLORS.text};
-  font-weight: bold;
-  font-size: 0.8rem;
-`;
-
-const CardPlaceholder = styled.div`
-  width: 100%;
-  height: 100%;
-  background: ${COLORS.surface};
-  border-radius: 0.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: ${COLORS.textSecondary};
-  font-size: 0.8rem;
-`;
-
-const CardAvatar = styled.div`
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  
-  img {
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 50%;
-    object-fit: cover;
-
-    @media (max-width: ${MOBILE_BREAKPOINT}) {
-      width: 2rem;
-      height: 2rem;
-    }
+    font-size: 1rem;
+    padding: 1rem;
   }
 `;
