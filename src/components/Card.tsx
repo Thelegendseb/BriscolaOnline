@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
 
 // ===== TYPE DEFINITIONS =====
@@ -128,30 +128,45 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   size = 'normal',
   colors,
   mobileBreakpoint = '768px'
-}) => (
-  <CardWrapper 
-    $disabled={disabled} 
-    $transform={transform}
-    onClick={disabled ? undefined : onClick}
-    $isButton={!!onClick}
-    $size={size}
-    $colors={colors}
-    $mobileBreakpoint={mobileBreakpoint}
-  >
-    {showAvatar && avatarSrc && (
-      <CardAvatar $mobileBreakpoint={mobileBreakpoint} $size={size}>
-        <img src={avatarSrc} alt="Player avatar" />
-      </CardAvatar>
-    )}
-    {isBack ? (
-      <CardBack $colors={colors} $size={size}>BRISCOLA</CardBack>
-    ) : card ? (
-      <CardImage src={card.imagePath} alt={card.name} />
-    ) : (
-      <CardPlaceholder $colors={colors} $size={size}>No Card</CardPlaceholder>
-    )}
-  </CardWrapper>
-);
+}) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  return (
+    <CardWrapper 
+      $disabled={disabled} 
+      $transform={transform}
+      onClick={disabled ? undefined : onClick}
+      $isButton={!!onClick}
+      $size={size}
+      $colors={colors}
+      $mobileBreakpoint={mobileBreakpoint}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      {showAvatar && avatarSrc && (
+        <CardAvatar $mobileBreakpoint={mobileBreakpoint} $size={size}>
+          <img src={avatarSrc} alt="Player avatar" />
+        </CardAvatar>
+      )}
+      {isBack ? (
+        <CardBack $colors={colors} $size={size}>BRISCOLA</CardBack>
+      ) : card ? (
+        <>
+          <CardImage src={card.imagePath} alt={card.name} />
+          {showTooltip && !isBack && card && (
+            <Tooltip $colors={colors} $size={size} $mobileBreakpoint={mobileBreakpoint}>
+              <TooltipTitle>{card.name}</TooltipTitle>
+              <TooltipScore>Score: {card.score} points</TooltipScore>
+              <TooltipSuit>Suit: {card.suit.charAt(0).toUpperCase() + card.suit.slice(1)}s</TooltipSuit>
+            </Tooltip>
+          )}
+        </>
+      ) : (
+        <CardPlaceholder $colors={colors} $size={size}>No Card</CardPlaceholder>
+      )}
+    </CardWrapper>
+  );
+};
 
 // ===== STYLED COMPONENTS =====
 const CardWrapper = styled.div<{ 
@@ -168,12 +183,12 @@ const CardWrapper = styled.div<{
   padding: ${props => props.$isButton ? '0.5rem' : '1rem'};
   position: relative;
   width: ${props => {
-    if (props.$size === 'tiny') return props.$isButton ? '2.5rem' : '3rem';
+    if (props.$size === 'tiny') return props.$isButton ? '3rem' : '3.5rem';
     if (props.$size === 'small') return props.$isButton ? '4rem' : '5rem';
     return props.$isButton ? '5rem' : '8rem';
   }};
   height: ${props => {
-    if (props.$size === 'tiny') return props.$isButton ? '3.5rem' : '4rem';
+    if (props.$size === 'tiny') return props.$isButton ? '4rem' : '4.5rem';
     if (props.$size === 'small') return props.$isButton ? '5.5rem' : '7rem';
     return props.$isButton ? '7rem' : '12rem';
   }};
@@ -184,23 +199,24 @@ const CardWrapper = styled.div<{
   opacity: ${props => props.$disabled ? 0.5 : 1};
   transform: ${props => props.$transform || 'none'};
   box-shadow: ${props => props.$isButton ? '0px 0.4rem 0px rgba(0, 0, 0, 0.25)' : 'none'};
+  transition: all 0.2s ease;
 
   &:hover {
     transform: ${props => 
       props.$disabled ? props.$transform || 'none' : 
       props.$isButton ? `${props.$transform || ''} translateY(-2px)`.trim() : 
-      props.$transform || 'none'
+      `${props.$transform || ''} translateY(-3px)`.trim()
     };
   }
 
   @media (max-width: ${props => props.$mobileBreakpoint}) {
     width: ${props => {
-      if (props.$size === 'tiny') return props.$isButton ? '2rem' : '2.5rem';
+      if (props.$size === 'tiny') return props.$isButton ? '2.5rem' : '3rem';
       if (props.$size === 'small') return props.$isButton ? '3rem' : '4rem';
       return props.$isButton ? '4rem' : '6rem';
     }};
     height: ${props => {
-      if (props.$size === 'tiny') return props.$isButton ? '3rem' : '3.5rem';
+      if (props.$size === 'tiny') return props.$isButton ? '3.5rem' : '4rem';
       if (props.$size === 'small') return props.$isButton ? '4.5rem' : '5.5rem';
       return props.$isButton ? '5.5rem' : '9rem';
     }};
@@ -252,6 +268,7 @@ const CardAvatar = styled.div<{ $mobileBreakpoint: string; $size: 'normal' | 'sm
   position: absolute;
   top: 3px;
   left: 3px;
+  z-index: 10;
   
   img {
     width: ${props => {
@@ -280,4 +297,76 @@ const CardAvatar = styled.div<{ $mobileBreakpoint: string; $size: 'normal' | 'sm
       }};
     }
   }
+`;
+
+const Tooltip = styled.div<{ $colors: CardComponentProps['colors']; $size: 'normal' | 'small' | 'tiny'; $mobileBreakpoint: string }>`
+  position: absolute;
+  top: ${props => {
+    if (props.$size === 'tiny') return '-50px';
+    if (props.$size === 'small') return '-60px';
+    return '-70px';
+  }};
+  left: 50%;
+  transform: translateX(-50%);
+  background: ${props => props.$colors.surface};
+  color: ${props => props.$colors.text};
+  padding: ${props => {
+    if (props.$size === 'tiny') return '0.25rem 0.5rem';
+    if (props.$size === 'small') return '0.5rem 0.75rem';
+    return '0.75rem 1rem';
+  }};
+  border-radius: 0.5rem;
+  font-size: ${props => {
+    if (props.$size === 'tiny') return '0.6rem';
+    if (props.$size === 'small') return '0.7rem';
+    return '0.8rem';
+  }};
+  white-space: nowrap;
+  z-index: 1000;
+  border: 2px solid ${props => props.$colors.primary};
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  animation: fadeIn 0.2s ease forwards;
+  pointer-events: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: ${props => props.$colors.surface};
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  @media (max-width: ${props => props.$mobileBreakpoint}) {
+    display: none; /* Hide tooltips on mobile to avoid touch issues */
+  }
+`;
+
+const TooltipTitle = styled.div`
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+`;
+
+const TooltipScore = styled.div`
+  color: #FFD700;
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+`;
+
+const TooltipSuit = styled.div`
+  color: #87CEEB;
+  font-size: 0.9em;
 `;

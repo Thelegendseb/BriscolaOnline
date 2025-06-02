@@ -22,10 +22,10 @@ import {
   shuffleDeck,
   BRISCOLA_VALUE_ORDER
 } from '@/components/Card';
-import { 
-  Notification, 
-  useNotification, 
-  NotificationType 
+import {
+  Notification,
+  useNotification,
+  NotificationType
 } from '@/components/Notification';
 
 // ===== COLOR THEME =====
@@ -90,7 +90,7 @@ const randomNumBetween = (min: number, max: number): number =>
   Math.floor(Math.random() * (max - min + 1) + min);
 
 const generateRandomTransform = (): string =>
-  `rotate(${randomNumBetween(-5, 5)}deg) translateX(${randomNumBetween(-10, 10)}px)`;
+  `rotate(${randomNumBetween(-10, 10)}deg) translateX(${randomNumBetween(-10, 10)}px)`;
 
 const extractPlayerInfo = (player: PlayerState): PlayerInfo => ({
   id: player.id,
@@ -112,7 +112,7 @@ const evaluateRound = (playedCards: PlayedCardData[], trumpSuit: Suit): string =
 // Calculate final scores based on card values
 const evaluateGame = (playerStacks: PlayerStack): { scores: { [playerId: string]: number }, winner: string } => {
   const scores: { [playerId: string]: number } = {};
-  
+
   Object.keys(playerStacks).forEach(playerId => {
     const stack = playerStacks[playerId];
     scores[playerId] = stack.reduce((total, card) => total + card.score, 0);
@@ -120,7 +120,7 @@ const evaluateGame = (playerStacks: PlayerStack): { scores: { [playerId: string]
 
   // Find winner (highest score)
   const winner = Object.keys(scores).reduce((a, b) => scores[a] > scores[b] ? a : b);
-  
+
   return { scores, winner };
 };
 
@@ -130,28 +130,6 @@ interface PlayerListProps {
   currentTurnIndex: number;
   playerStacks: PlayerStack;
 }
-
-const PlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex, playerStacks }) => (
-  <PlayerListContainer>
-    <PlayerListTitle>Players ({players.length})</PlayerListTitle>
-    {players.map((player, index) => {
-      const playerInfo = extractPlayerInfo(player);
-      const isCurrentTurn = index === currentTurnIndex;
-      const stackCount = playerStacks[player.id]?.length || 0;
-
-      return (
-        <PlayerItem key={playerInfo.id} $isCurrentTurn={isCurrentTurn}>
-          <PlayerAvatar src={playerInfo.avatar} alt={playerInfo.username} />
-          <PlayerDetails>
-            <PlayerName>{playerInfo.username}</PlayerName>
-            <StackCount>{stackCount} cards won</StackCount>
-          </PlayerDetails>
-          {isCurrentTurn && <TurnIndicator>●</TurnIndicator>}
-        </PlayerItem>
-      );
-    })}
-  </PlayerListContainer>
-);
 
 interface TrumpDisplayProps {
   trumpCard: Card | null;
@@ -166,14 +144,14 @@ interface DeckStackProps {
 
 const DeckStack: React.FC<DeckStackProps> = ({ deck, colors }) => {
   const maxVisibleCards = Math.min(6, deck.length);
-  
+
   return (
     <DeckStackContainer>
       {Array.from({ length: maxVisibleCards }, (_, index) => (
         <DeckCard
           key={`deck-${index}`}
           $zIndex={index}
-          $rotation={randomNumBetween(-2, 2)}
+          $rotation={randomNumBetween(-10, 10)}
           $offset={index * 0.3}
         >
           <CardComponent
@@ -287,7 +265,20 @@ const GameApp: React.FC = () => {
 
     const fullDeck = shuffleDeck(createDeck());
     const trumpCard = fullDeck.pop()!; // Remove trump card from deck
-    
+
+    // Balance deck so remaining cards are divisible by number of players
+    const remainingCards = fullDeck.length;
+    const cardsToRemove = remainingCards % players.length;
+
+    if (cardsToRemove > 0) {
+      console.log(`Removing ${cardsToRemove} cards to balance deck for ${players.length} players`);
+      for (let i = 0; i < cardsToRemove; i++) {
+        fullDeck.pop();
+      }
+    }
+
+    console.log(`Deck balanced: ${fullDeck.length} cards for ${players.length} players`);
+
     // Deal cards to players
     const { newDeck, hands } = dealCards(fullDeck, players);
 
@@ -315,252 +306,264 @@ const GameApp: React.FC = () => {
 
     showNotification(`Game started! Trump suit: ${trumpCard.suit}s`, NotificationType.SUCCESS);
     showNotification(`Cards dealt! Each player has ${CARDS_PER_PLAYER} cards`, NotificationType.INFO);
+
+    if (cardsToRemove > 0) {
+      showNotification(`${cardsToRemove} cards removed to balance deck`, NotificationType.INFO);
+    }
   }, [isGameHost, gameState, setGameState, showNotification, dealCards, players]);
 
-const resolveRound = useCallback(async (currentPlayedCards: PlayedCardData[], updatedPlayerHands: PlayerHand) => {
-  if (!isGameHost) {
-    console.log('Skipping resolve - not host');
-    return;
-  }
-
-  console.log('Starting round resolution...');
-  showNotification("Resolving round...", NotificationType.INFO);
-  
-  const winnerId = evaluateRound(currentPlayedCards, gameState.trumpCard?.suit || 'coin' as Suit);
-  const winner = players.find(p => p.id === winnerId);
-  const winnerInfo = winner ? extractPlayerInfo(winner) : null;
-
-  showNotification(`${winnerInfo?.username || 'Someone'} wins the round!`, NotificationType.SUCCESS);
-
-  await sleep(1000);
-
-  // Add all played cards to winner's stack
-  const newPlayerStacks = { ...gameState.playerStacks };
-  if (!newPlayerStacks[winnerId]) {
-    newPlayerStacks[winnerId] = [];
-  }
-  newPlayerStacks[winnerId].push(...currentPlayedCards.map(pc => pc.card));
-
-  // IMPORTANT: Clear played cards immediately at the start
-  setPlayedCards([]);
-
-  // Use the updated hands passed from handleCardPlay
-  let newDeck = [...gameState.deck];
-  let newHands = { ...updatedPlayerHands };
-
-  console.log('=== CARD DRAWING DEBUG ===');
-  console.log('Initial deck size:', newDeck.length);
-  console.log('Played cards:', currentPlayedCards.map(pc => {
-    const player = players.find(p => p.id === pc.playerId);
-    const username = player ? extractPlayerInfo(player).username : pc.playerId;
-    return `${username} played ${pc.card.name}`;
-  }));
-  console.log('Player hands before drawing:', Object.keys(newHands).map(id => {
-    const player = players.find(p => p.id === id);
-    const username = player ? extractPlayerInfo(player).username : id;
-    return `${username}: ${newHands[id].length} cards`;
-  }));
-
-  if (newDeck.length > 0) {
-    // Winner draws first, then other players in order
-    const winnerIndex = players.findIndex(p => p.id === winnerId);
-    const drawOrder = [];
-    
-    // Create draw order starting with winner
-    for (let i = 0; i < players.length; i++) {
-      const playerIndex = (winnerIndex + i) % players.length;
-      drawOrder.push(players[playerIndex].id);
+  const resolveRound = useCallback(async (currentPlayedCards: PlayedCardData[], updatedPlayerHands: PlayerHand) => {
+    if (!isGameHost) {
+      console.log('Skipping resolve - not host');
+      return;
     }
-    
-    console.log('Draw order:', drawOrder.map(id => {
-      const player = players.find(p => p.id === id);
-      return player ? extractPlayerInfo(player).username : id;
+
+    console.log('Starting round resolution...');
+    showNotification("Resolving round...", NotificationType.INFO);
+
+    const winnerId = evaluateRound(currentPlayedCards, gameState.trumpCard?.suit || 'coin' as Suit);
+    const winner = players.find(p => p.id === winnerId);
+    const winnerInfo = winner ? extractPlayerInfo(winner) : null;
+
+    showNotification(`${winnerInfo?.username || 'Someone'} wins the round!`, NotificationType.SUCCESS);
+
+    await sleep(1000);
+
+    // Add all played cards to winner's stack
+    const newPlayerStacks = { ...gameState.playerStacks };
+    if (!newPlayerStacks[winnerId]) {
+      newPlayerStacks[winnerId] = [];
+    }
+    newPlayerStacks[winnerId].push(...currentPlayedCards.map(pc => pc.card));
+
+    // IMPORTANT: Clear played cards immediately at the start
+    setPlayedCards([]);
+
+    // Use the updated hands passed from handleCardPlay
+    let newDeck = [...gameState.deck];
+    let newHands = { ...updatedPlayerHands };
+
+    console.log('=== CARD DRAWING DEBUG ===');
+    console.log('Initial deck size:', newDeck.length);
+    console.log('Played cards:', currentPlayedCards.map(pc => {
+      const player = players.find(p => p.id === pc.playerId);
+      const username = player ? extractPlayerInfo(player).username : pc.playerId;
+      return `${username} played ${pc.card.name}`;
     }));
-
-    // Each player draws cards until they have CARDS_PER_PLAYER cards (or deck is empty)
-    for (const playerId of drawOrder) {
-      console.log(`\n--- Drawing cards for player ${playerId}...`);
-      const player = players.find(p => p.id === playerId);
-      const username = player ? extractPlayerInfo(player).username : playerId;
-      console.log(`Player name: ${username}`);
-      console.log(`Player hand size before: ${newHands[playerId].length}`);
-      console.log(`Cards needed: ${CARDS_PER_PLAYER - newHands[playerId].length}`);
-      console.log(`Deck size: ${newDeck.length}`);
-      
-      let cardsDrawn = 0;
-      // Draw cards until player has CARDS_PER_PLAYER cards (or deck is empty)
-      while (newDeck.length > 0 && newHands[playerId].length < CARDS_PER_PLAYER) {
-        console.log(`Drawing card ${cardsDrawn + 1} for ${username}`);
-        console.log(`Deck size before draw: ${newDeck.length}`);
-        const card = newDeck.pop()!;
-        console.log(`Drew card: ${card.name} (${card.suit})`);
-        console.log(`Deck size after draw: ${newDeck.length}`);
-        console.log(`Player ${username} hand size before adding: ${newHands[playerId].length}`);
-        newHands[playerId].push(card);
-        console.log(`Player ${username} hand size after adding: ${newHands[playerId].length}`);
-        cardsDrawn++;
-      }
-      console.log(`${username} drew ${cardsDrawn} cards total`);
-    }
-    
-    console.log('\n=== FINAL STATE ===');
-    console.log('Final deck size:', newDeck.length);
-    console.log('Player hands after drawing:', Object.keys(newHands).map(id => {
+    console.log('Player hands before drawing:', Object.keys(newHands).map(id => {
       const player = players.find(p => p.id === id);
       const username = player ? extractPlayerInfo(player).username : id;
       return `${username}: ${newHands[id].length} cards`;
     }));
-  } else {
-    console.log('No cards left in deck to draw');
-  }
-
-  // Continue with rest of function...
-  // Check if game should end
-  const allHandsEmpty = Object.values(newHands).every(hand => hand.length === 0);
-  const deckEmpty = newDeck.length === 0;
-
-  if (allHandsEmpty && deckEmpty) {
-    // Game is over - evaluate final scores
-    showNotification("All cards played! Calculating final scores...", NotificationType.INFO);
-    
-    await sleep(1000);
-    
-    const { scores, winner: gameWinnerId } = evaluateGame(newPlayerStacks);
-    const gameWinner = players.find(p => p.id === gameWinnerId);
-    const gameWinnerInfo = gameWinner ? extractPlayerInfo(gameWinner) : null;
-
-    const finalGameState = {
-      ...gameState,
-      playerStacks: newPlayerStacks,
-      playerHands: newHands,
-      deck: newDeck,
-      currentRound: gameState.currentRound + 1,
-      roundWinner: winnerId,
-      isResolvingRound: false,
-      gameOver: true,
-      finalScores: scores,
-      gameWinner: gameWinnerId
-    };
-
-    setGameState(finalGameState);
-
-    await sleep(1000);
-    
-    showNotification(`Game Over! ${gameWinnerInfo?.username} wins with ${scores[gameWinnerId]} points!`, NotificationType.SUCCESS);
-  } else {
-    // Continue game - set up next round
-    const updatedGameState = {
-      ...gameState,
-      playerStacks: newPlayerStacks,
-      playerHands: newHands,
-      deck: newDeck,
-      currentRound: gameState.currentRound + 1,
-      roundWinner: winnerId,
-      isResolvingRound: false
-    };
-
-    setGameState(updatedGameState);
-    
-    // Winner of the round starts the next round
-    const winnerIndex = players.findIndex(p => p.id === winnerId);
-    setCurrentTurn(winnerIndex);
 
     if (newDeck.length > 0) {
-      showNotification(`Round ${gameState.currentRound} complete! Cards drawn. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
+      // Winner draws first, then other players in order
+      const winnerIndex = players.findIndex(p => p.id === winnerId);
+      const drawOrder = [];
+
+      // Create draw order starting with winner
+      for (let i = 0; i < players.length; i++) {
+        const playerIndex = (winnerIndex + i) % players.length;
+        drawOrder.push(players[playerIndex].id);
+      }
+
+      console.log('Draw order:', drawOrder.map(id => {
+        const player = players.find(p => p.id === id);
+        return player ? extractPlayerInfo(player).username : id;
+      }));
+
+      // Each player draws cards until they have CARDS_PER_PLAYER cards (or deck is empty)
+      for (const playerId of drawOrder) {
+        console.log(`\n--- Drawing cards for player ${playerId}...`);
+        const player = players.find(p => p.id === playerId);
+        const username = player ? extractPlayerInfo(player).username : playerId;
+        console.log(`Player name: ${username}`);
+        console.log(`Player hand size before: ${newHands[playerId].length}`);
+        console.log(`Cards needed: ${CARDS_PER_PLAYER - newHands[playerId].length}`);
+        console.log(`Deck size: ${newDeck.length}`);
+
+        let cardsDrawn = 0;
+        // Draw cards until player has CARDS_PER_PLAYER cards (or deck is empty)
+        while (newDeck.length > 0 && newHands[playerId].length < CARDS_PER_PLAYER) {
+          console.log(`Drawing card ${cardsDrawn + 1} for ${username}`);
+          console.log(`Deck size before draw: ${newDeck.length}`);
+          const card = newDeck.pop()!;
+          console.log(`Drew card: ${card.name} (${card.suit})`);
+          console.log(`Deck size after draw: ${newDeck.length}`);
+          console.log(`Player ${username} hand size before adding: ${newHands[playerId].length}`);
+          newHands[playerId].push(card);
+          console.log(`Player ${username} hand size after adding: ${newHands[playerId].length}`);
+          cardsDrawn++;
+        }
+        console.log(`${username} drew ${cardsDrawn} cards total`);
+      }
+
+      console.log('\n=== FINAL STATE ===');
+      console.log('Final deck size:', newDeck.length);
+      console.log('Player hands after drawing:', Object.keys(newHands).map(id => {
+        const player = players.find(p => p.id === id);
+        const username = player ? extractPlayerInfo(player).username : id;
+        return `${username}: ${newHands[id].length} cards`;
+      }));
     } else {
-      showNotification(`Round ${gameState.currentRound} complete! No more cards to draw. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
+      console.log('No cards left in deck to draw - entering final rounds');
     }
-  }
 
-  console.log('Round resolution complete');
-}, [isGameHost, players, gameState, setGameState, setPlayedCards, setCurrentTurn, showNotification]);
+    // Check if game should end - only when all hands are empty AND deck is empty
+    const allHandsEmpty = Object.values(newHands).every(hand => hand.length === 0);
+    const deckEmpty = newDeck.length === 0;
 
-// Add this useEffect to monitor playedCards changes
-useEffect(() => {
-  // Only the host should monitor for round completion
-  if (!isGameHost || !gameState.gameStarted || gameState.isResolvingRound) {
-    return;
-  }
+    console.log('Game end check:', { allHandsEmpty, deckEmpty });
 
-  // Check if all players have played their cards
-  if (playedCards.length === players.length && players.length > 0) {
-    console.log('=== ROUND COMPLETION DETECTED ===');
-    console.log('PlayedCards length:', playedCards.length);
-    console.log('Players length:', players.length);
-    console.log('All players have played - triggering resolution');
+    if (allHandsEmpty && deckEmpty) {
+      // Game is over - evaluate final scores
+      showNotification("All cards played! Calculating final scores...", NotificationType.INFO);
 
-    // Verify all players have exactly 2 cards (meaning they've all played one)
-    const allPlayersHave2Cards = Object.keys(gameState.playerHands).every(playerId => 
-      gameState.playerHands[playerId].length === 2
-    );
+      await sleep(1000);
 
-    console.log('All players have 2 cards:', allPlayersHave2Cards);
-    console.log('Player hands:', Object.keys(gameState.playerHands).map(id => {
-      const player = players.find(p => p.id === id);
-      const username = player ? extractPlayerInfo(player).username : id;
-      return `${username}: ${gameState.playerHands[id].length} cards`;
-    }));
+      const { scores, winner: gameWinnerId } = evaluateGame(newPlayerStacks);
+      const gameWinner = players.find(p => p.id === gameWinnerId);
+      const gameWinnerInfo = gameWinner ? extractPlayerInfo(gameWinner) : null;
 
-    if (allPlayersHave2Cards) {
-      console.log('Triggering round resolution from useEffect...');
-      // Set resolving state
-      setGameState({ ...gameState, isResolvingRound: true });
-      
-      setTimeout(() => {
-        resolveRound(playedCards, gameState.playerHands);
-      }, 1000);
+      const finalGameState = {
+        ...gameState,
+        playerStacks: newPlayerStacks,
+        playerHands: newHands,
+        deck: newDeck,
+        currentRound: gameState.currentRound + 1,
+        roundWinner: winnerId,
+        isResolvingRound: false,
+        gameOver: true,
+        finalScores: scores,
+        gameWinner: gameWinnerId
+      };
+
+      setGameState(finalGameState);
+
+      await sleep(1000);
+
+      showNotification(`Game Over! ${gameWinnerInfo?.username} wins with ${scores[gameWinnerId]} points!`, NotificationType.SUCCESS);
+    } else {
+      // Continue game - set up next round
+      const updatedGameState = {
+        ...gameState,
+        playerStacks: newPlayerStacks,
+        playerHands: newHands,
+        deck: newDeck,
+        currentRound: gameState.currentRound + 1,
+        roundWinner: winnerId,
+        isResolvingRound: false
+      };
+
+      setGameState(updatedGameState);
+
+      // Winner of the round starts the next round
+      const winnerIndex = players.findIndex(p => p.id === winnerId);
+      setCurrentTurn(winnerIndex);
+
+      if (newDeck.length > 0) {
+        showNotification(`Round ${gameState.currentRound} complete! Cards drawn. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
+      } else {
+        // Deck is empty but players still have cards - final rounds
+        const maxHandSize = Math.max(...Object.values(newHands).map(hand => hand.length));
+        showNotification(`Round ${gameState.currentRound} complete! No more cards to draw. ${maxHandSize} final rounds remaining.`, NotificationType.INFO);
+      }
     }
-  }
-}, [playedCards, players.length, isGameHost, gameState, resolveRound]);
 
-const handleCardPlay = useCallback((card: Card) => {
-  if (!isMyTurn || !currentPlayer || !gameState.gameStarted || gameState.isResolvingRound) {
-    showNotification("It's not your turn or game is being resolved!", NotificationType.WARNING);
-    return;
-  }
+    console.log('Round resolution complete');
+  }, [isGameHost, players, gameState, setGameState, setPlayedCards, setCurrentTurn, showNotification]);
 
-  const currentPlayerHand = gameState.playerHands[currentPlayer.id] || [];
-  const cardIndex = currentPlayerHand.findIndex(c => c.id === card.id);
-  
-  if (cardIndex === -1) {
-    showNotification("You don't have that card!", NotificationType.ERROR);
-    return;
-  }
-
-  // Remove card from player's hand
-  const newPlayerHands = { ...gameState.playerHands };
-  newPlayerHands[currentPlayer.id] = currentPlayerHand.filter(c => c.id !== card.id);
-
-  const newPlayedCard: PlayedCardData = {
-    card,
-    playerId: currentPlayer.id,
-    transform: generateRandomTransform()
-  };
-
-  const newPlayedCards = [...playedCards, newPlayedCard];
-  const nextTurn = (currentTurn + 1) % players.length;
-  
-  console.log('=== CARD PLAY DEBUG ===');
-  console.log('Current playedCards length:', playedCards.length);
-  console.log('Adding card:', newPlayedCard.card.name);
-  console.log('New playedCards length:', newPlayedCards.length);
-  console.log('Is game host:', isGameHost);
-  
-  setPlayedCards(newPlayedCards);
-  setCurrentTurn(nextTurn);
-  setGameState({ ...gameState, playerHands: newPlayerHands });
-}, [isMyTurn, currentPlayer, gameState, playedCards, currentTurn, players.length, setPlayedCards, setCurrentTurn, setGameState, showNotification, isGameHost]);
-
-
-// Initialize game when host and players are ready
+  // Add this useEffect to monitor playedCards changes
   useEffect(() => {
-    if (isGameHost && players.length >= 2 && !gameState.gameStarted && !gameState.isShuffling) {
+    // Only the host should monitor for round completion
+    if (!isGameHost || !gameState.gameStarted || gameState.isResolvingRound) {
+      return;
+    }
+
+    // Check if all players have played their cards
+    if (playedCards.length === players.length && players.length > 0) {
+      console.log('=== ROUND COMPLETION DETECTED ===');
+      console.log('PlayedCards length:', playedCards.length);
+      console.log('Players length:', players.length);
+      console.log('All players have played - triggering resolution');
+
+      // Verify all players have played exactly one card each
+      const expectedHandSize = gameState.deck.length > 0 ? 2 :
+        Math.max(...Object.values(gameState.playerHands).map(hand => hand.length)) - 1;
+
+      const allPlayersPlayedCard = Object.keys(gameState.playerHands).every(playerId =>
+        gameState.playerHands[playerId].length === expectedHandSize
+      );
+
+      console.log('Expected hand size after playing:', expectedHandSize);
+      console.log('All players played card:', allPlayersPlayedCard);
+      console.log('Player hands:', Object.keys(gameState.playerHands).map(id => {
+        const player = players.find(p => p.id === id);
+        const username = player ? extractPlayerInfo(player).username : id;
+        return `${username}: ${gameState.playerHands[id].length} cards`;
+      }));
+
+      if (allPlayersPlayedCard) {
+        console.log('Triggering round resolution from useEffect...');
+        // Set resolving state
+        setGameState({ ...gameState, isResolvingRound: true });
+
+        setTimeout(() => {
+          resolveRound(playedCards, gameState.playerHands);
+        }, 1000);
+      }
+    }
+  }, [playedCards, players.length, isGameHost, gameState, resolveRound]);
+
+  const handleCardPlay = useCallback((card: Card) => {
+    if (!isMyTurn || !currentPlayer || !gameState.gameStarted || gameState.isResolvingRound) {
+      showNotification("It's not your turn or game is being resolved!", NotificationType.WARNING);
+      return;
+    }
+
+    const currentPlayerHand = gameState.playerHands[currentPlayer.id] || [];
+    const cardIndex = currentPlayerHand.findIndex(c => c.id === card.id);
+
+    if (cardIndex === -1) {
+      showNotification("You don't have that card!", NotificationType.ERROR);
+      return;
+    }
+
+    // Remove card from player's hand
+    const newPlayerHands = { ...gameState.playerHands };
+    newPlayerHands[currentPlayer.id] = currentPlayerHand.filter(c => c.id !== card.id);
+
+    const newPlayedCard: PlayedCardData = {
+      card,
+      playerId: currentPlayer.id,
+      transform: generateRandomTransform()
+    };
+
+    const newPlayedCards = [...playedCards, newPlayedCard];
+    const nextTurn = (currentTurn + 1) % players.length;
+
+    console.log('=== CARD PLAY DEBUG ===');
+    console.log('Current playedCards length:', playedCards.length);
+    console.log('Adding card:', newPlayedCard.card.name);
+    console.log('New playedCards length:', newPlayedCards.length);
+    console.log('Is game host:', isGameHost);
+
+    setPlayedCards(newPlayedCards);
+    setCurrentTurn(nextTurn);
+    setGameState({ ...gameState, playerHands: newPlayerHands });
+  }, [isMyTurn, currentPlayer, gameState, playedCards, currentTurn, players.length, setPlayedCards, setCurrentTurn, setGameState, showNotification, isGameHost]);
+
+
+  // Initialize game when host and players are ready
+  useEffect(() => {
+    if (isGameHost && players.length >= 2 && players.length <= 3 && !gameState.gameStarted && !gameState.isShuffling) {
       const timer = setTimeout(() => {
         initializeGame();
       }, 1000);
       return () => clearTimeout(timer);
     }
   }, [isGameHost, players.length, gameState.gameStarted, gameState.isShuffling, initializeGame]);
+
 
   // Handle player joining
   useEffect(() => {
@@ -577,7 +580,7 @@ const handleCardPlay = useCallback((card: Card) => {
   // Get current player's hand and stack
   const currentPlayerHand = currentPlayer ? (gameState.playerHands[currentPlayer.id] || []) : [];
   const currentPlayerStack = currentPlayer ? (gameState.playerStacks[currentPlayer.id] || []) : [];
-  
+
   // Get opponents (players other than current player)
   const opponents = players.filter(p => p.id !== currentPlayer?.id);
 
@@ -604,8 +607,8 @@ const handleCardPlay = useCallback((card: Card) => {
     <GameContainer>
       <GlobalStyle />
 
-      <Notification 
-        notification={notification} 
+      <Notification
+        notification={notification}
         colors={notificationColors}
         position="top"
       />
@@ -672,8 +675,8 @@ const handleCardPlay = useCallback((card: Card) => {
       <DesktopTrumpDisplay trumpCard={gameState.trumpCard} deck={gameState.deck} />
 
       <PlayAreaContainer>
-        {/* Opponent Hands */}
-        <OpponentHandsContainer>
+        {/* Opponent Hands - Updated for 3 players */}
+        <OpponentHandsContainer $playerCount={players.length}>
           {opponents.map(opponent => {
             const playerInfo = extractPlayerInfo(opponent);
             const opponentHand = gameState.playerHands[opponent.id] || [];
@@ -725,6 +728,16 @@ const handleCardPlay = useCallback((card: Card) => {
           </GameOverDisplay>
         )}
 
+        {/* Display deck empty message during final rounds */}
+        {gameState.deck.length === 0 && !gameState.gameOver && (
+          <FinalRoundsIndicator>
+            <FinalRoundsText>Final Rounds - No More Cards to Draw!</FinalRoundsText>
+            <FinalRoundsSubtext>
+              {Math.max(...Object.values(gameState.playerHands).map(hand => hand.length))} rounds remaining
+            </FinalRoundsSubtext>
+          </FinalRoundsIndicator>
+        )}
+
         {playedCards.map((playedCard, index) => {
           const player = players.find(p => p.id === playedCard.playerId);
           const playerInfo = player ? extractPlayerInfo(player) : null;
@@ -745,7 +758,6 @@ const handleCardPlay = useCallback((card: Card) => {
       </PlayAreaContainer>
 
       <HandContainer>
-
         {gameState.gameOver ? (
           <GameOverMessage>
             Game Complete! Check the final scores above.
@@ -772,8 +784,7 @@ const handleCardPlay = useCallback((card: Card) => {
       </HandContainer>
     </GameContainer>
   );
-};
-
+}
 // Update the PlayerList component for desktop
 const DesktopPlayerList: React.FC<PlayerListProps> = ({ players, currentTurnIndex, playerStacks }) => (
   <DesktopPlayerListContainer>
@@ -996,55 +1007,8 @@ const DeckCard = styled.div<{ $zIndex: number; $rotation: number; $offset: numbe
   transition: all 0.2s ease;
 `;
 
-/* ===== STACK COMPONENTS ===== */
-const StackContainer = styled.div`
-  position: relative;
-  width: 60px;
-  height: 50px;
-  margin-top: 0.5rem;
-  
-  @media (max-width: ${MOBILE_BREAKPOINT}) {
-    width: 50px;
-    height: 40px;
-  }
-`;
-
-const StackCard = styled.div<{ $zIndex: number; $rotation: number; $offset: number }>`
-  position: absolute;
-  top: ${props => props.$offset}px;
-  left: ${props => props.$offset}px;
-  z-index: ${props => props.$zIndex};
-  transform: rotate(${props => props.$rotation}deg);
-`;
-
-const StackCounter = styled.div`
-  position: absolute;
-  bottom: -15px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.6rem;
-  color: ${COLORS.textSecondary};
-  background-color: ${COLORS.surface};
-  padding: 2px 6px;
-  border-radius: 8px;
-  white-space: nowrap;
-`;
-
-const EmptyStack = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border: 2px dashed ${COLORS.surface};
-  border-radius: 0.5rem;
-  font-size: 0.6rem;
-  color: ${COLORS.textSecondary};
-  text-align: center;
-`;
-
 /* ===== OPPONENT HAND COMPONENTS ===== */
-const OpponentHandsContainer = styled.div`
+const OpponentHandsContainer = styled.div<{ $playerCount: number }>`
   position: absolute;
   top: 1.5rem;
   left: 50%;
@@ -1052,12 +1016,24 @@ const OpponentHandsContainer = styled.div`
   display: flex;
   gap: 2rem;
   z-index: 50;
+  
+  /* For 3 players, arrange them in a row */
+  ${props => props.$playerCount === 3 && `
+    justify-content: center;
+    max-width: 90%;
+    flex-wrap: wrap;
+  `}
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
     top: 1rem;
     gap: 1rem;
-    flex-direction: column;
+    flex-direction: ${props => props.$playerCount === 3 ? 'row' : 'column'};
     align-items: center;
+    
+    ${props => props.$playerCount === 3 && `
+      flex-wrap: wrap;
+      justify-content: center;
+    `}
   }
 `;
 
@@ -1184,24 +1160,6 @@ const MobileStackCount = styled.span`
   max-width: 100%;
 `;
 
-const WaitingMessage = styled.div`
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%); 
-  background-color: ${COLORS.surface};
-  color: ${COLORS.text};
-  padding: 1rem 2rem;
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  font-size: 1rem;
-  text-align: center;
-  z-index: 100;
-  animation: ${slideUp} 1s ease-out forwards;
-`;
-
-
-
 const MobileDeckSection = styled.div`
   display: flex;
   flex-direction: column;
@@ -1282,7 +1240,7 @@ const MobilePlayerName = styled.span`
 const DeckCount = styled.span`
   font-size: 0.7rem;
   color: ${COLORS.textSecondary};
-  margin-top: 1rem;
+  margin-top: 1.5rem;
   text-align: center;
   display: block;
   width: 100%;
@@ -1458,13 +1416,13 @@ const TrumpContainer = styled.div`
 `;
 
 const TrumpTitle = styled.h3`
-  margin: 0 0 1rem 0;
+  margin: 0 0 2rem 0;
   font-size: 1.2rem;
   color: ${COLORS.textSecondary};
 
   @media (max-width: ${MOBILE_BREAKPOINT}) {
     font-size: 0.9rem;
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 1rem 0;
   }
 `;
 
@@ -1519,6 +1477,44 @@ const TrumpInfo = styled.div`
     div:last-child {
       font-size: 0.6rem;
     }
+  }
+`;
+
+const FinalRoundsIndicator = styled.div`
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: ${COLORS.glassBg};
+  border-radius: 1rem;
+  padding: 1.5rem;
+  backdrop-filter: blur(10px);
+  border: 2px solid ${COLORS.error};
+  z-index: 10;
+`;
+
+const FinalRoundsText = styled.span`
+  font-size: 1.3rem;
+  color: ${COLORS.error};
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 0.5rem;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 1.1rem;
+  }
+`;
+
+const FinalRoundsSubtext = styled.span`
+  font-size: 1rem;
+  color: ${COLORS.textSecondary};
+  text-align: center;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    font-size: 0.9rem;
   }
 `;
 
