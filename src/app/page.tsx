@@ -729,7 +729,7 @@ const GameApp: React.FC = () => {
         )}
 
         {/* Display deck empty message during final rounds */}
-        {gameState.deck.length === 0 && !gameState.gameOver && (
+                {gameState.deck.length === 0 && !gameState.gameOver && gameState.gameStarted && gameState.cardsDealt && (
           <FinalRoundsIndicator>
             <FinalRoundsText>Final Rounds - No More Cards to Draw!</FinalRoundsText>
             <FinalRoundsSubtext>
@@ -1480,6 +1480,25 @@ const TrumpInfo = styled.div`
   }
 `;
 
+const fadeInOut = keyframes`
+  0% { 
+    opacity: 0; 
+    transform: translate(-50%, -50%) scale(0.8); 
+  }
+  10% { 
+    opacity: 1; 
+    transform: translate(-50%, -50%) scale(1); 
+  }
+  90% { 
+    opacity: 1; 
+    transform: translate(-50%, -50%) scale(1); 
+  }
+  100% { 
+    opacity: 0; 
+    transform: translate(-50%, -50%) scale(0.8); 
+  }
+`;
+
 const FinalRoundsIndicator = styled.div`
   position: absolute;
   top: 50%;
@@ -1494,6 +1513,7 @@ const FinalRoundsIndicator = styled.div`
   backdrop-filter: blur(10px);
   border: 2px solid ${COLORS.error};
   z-index: 10;
+  animation: ${fadeInOut} 3s ease-in-out;
 `;
 
 const FinalRoundsText = styled.span`

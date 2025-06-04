@@ -149,7 +149,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
         </CardAvatar>
       )}
       {isBack ? (
-        <CardBack $colors={colors} $size={size}>BRISCOLA</CardBack>
+        <CardImage src="/assets/cards/back.png" alt="Card back" />
       ) : card ? (
         <>
           <CardImage src={card.imagePath} alt={card.name} />
@@ -180,7 +180,7 @@ const CardWrapper = styled.div<{
   background: ${props => props.$colors.cardBg};
   border: 3px solid ${props => props.$colors.cardBorder};
   border-radius: ${props => props.$isButton ? '0.8rem' : '1.2rem'};
-  padding: ${props => props.$isButton ? '0.5rem' : '1rem'};
+  padding: ${props => props.$isButton ? '0.2rem' : '0.3rem'}; /* Reduced from 0.5rem/1rem */
   position: relative;
   width: ${props => {
     if (props.$size === 'tiny') return props.$isButton ? '3rem' : '3.5rem';
@@ -220,7 +220,7 @@ const CardWrapper = styled.div<{
       if (props.$size === 'small') return props.$isButton ? '4.5rem' : '5.5rem';
       return props.$isButton ? '5.5rem' : '9rem';
     }};
-    padding: ${props => props.$isButton ? '0.3rem' : '0.8rem'};
+    padding: ${props => props.$isButton ? '0.1rem' : '0.2rem'}; /* Reduced mobile padding too */
   }
 `;
 
@@ -229,23 +229,6 @@ const CardImage = styled.img`
   height: 100%;
   object-fit: contain;
   border-radius: 0.4rem;
-`;
-
-const CardBack = styled.div<{ $colors: CardComponentProps['colors']; $size: 'normal' | 'small' | 'tiny' }>`
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(45deg, ${props => props.$colors.primary}, ${props => props.$colors.secondary});
-  border-radius: 0.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: ${props => props.$colors.text};
-  font-weight: bold;
-  font-size: ${props => {
-    if (props.$size === 'tiny') return '0.4rem';
-    if (props.$size === 'small') return '0.6rem';
-    return '0.8rem';
-  }};
 `;
 
 const CardPlaceholder = styled.div<{ $colors: CardComponentProps['colors']; $size: 'normal' | 'small' | 'tiny' }>`
