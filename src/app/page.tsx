@@ -559,7 +559,7 @@ const GameApp: React.FC = () => {
     if (isGameHost && players.length >= 2 && players.length <= 3 && !gameState.gameStarted && !gameState.isShuffling) {
       const timer = setTimeout(() => {
         initializeGame();
-      }, 1000);
+      }, 1001);
       return () => clearTimeout(timer);
     }
   }, [isGameHost, players.length, gameState.gameStarted, gameState.isShuffling, initializeGame]);
