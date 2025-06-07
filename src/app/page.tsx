@@ -758,7 +758,7 @@ const GameApp: React.FC = () => {
         )}
 
         {/* Display deck empty message during final rounds */}
-                {gameState.deck.length === 0 && !gameState.gameOver && gameState.gameStarted && gameState.cardsDealt && (
+        {gameState.deck.length === 0 && !gameState.gameOver && gameState.gameStarted && gameState.cardsDealt && (
           <FinalRoundsIndicator>
             <FinalRoundsText>Final Rounds - No More Cards to Draw!</FinalRoundsText>
             <FinalRoundsSubtext>
@@ -767,23 +767,28 @@ const GameApp: React.FC = () => {
           </FinalRoundsIndicator>
         )}
 
-        {playedCards.map((playedCard, index) => {
-          const player = players.find(p => p.id === playedCard.playerId);
-          const playerInfo = player ? extractPlayerInfo(player) : null;
+        {/* Played cards container - now side by side */}
+        {playedCards.length > 0 && (
+          <PlayedCardsContainer>
+            {playedCards.map((playedCard, index) => {
+              const player = players.find(p => p.id === playedCard.playerId);
+              const playerInfo = player ? extractPlayerInfo(player) : null;
 
-          return (
-            <PlayedCardContainer key={`${playedCard.playerId}-${index}`}>
-              <CardComponent
-                card={playedCard.card}
-                showAvatar={true}
-                avatarSrc={playerInfo?.avatar}
-                transform={playedCard.transform}
-                colors={cardColors}
-                mobileBreakpoint={MOBILE_BREAKPOINT}
-              />
-            </PlayedCardContainer>
-          );
-        })}
+              return (
+                <PlayedCardContainer key={`${playedCard.playerId}-${index}`}>
+                  <CardComponent
+                    card={playedCard.card}
+                    showAvatar={true}
+                    avatarSrc={playerInfo?.avatar}
+                    transform={playedCard.transform}
+                    colors={cardColors}
+                    mobileBreakpoint={MOBILE_BREAKPOINT}
+                  />
+                </PlayedCardContainer>
+              );
+            })}
+          </PlayedCardsContainer>
+        )}
       </PlayAreaContainer>
 
       <HandContainer>
@@ -1584,9 +1589,26 @@ const PlayAreaContainer = styled.div`
   }
 `;
 
-const PlayedCardContainer = styled.div`
+const PlayedCardsContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
   position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+
+  @media (max-width: ${MOBILE_BREAKPOINT}) {
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+`;
+
+const PlayedCardContainer = styled.div`
   animation: ${slideUp} 2s linear;
+  position: relative;
 `;
 
 const ShufflingIndicator = styled.div`
