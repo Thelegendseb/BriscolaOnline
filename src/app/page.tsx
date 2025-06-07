@@ -104,9 +104,37 @@ const sleep = (ms: number): Promise<void> =>
 
 // Placeholder Round evaluation function
 const evaluateRound = (playedCards: PlayedCardData[], trumpSuit: Suit): string => {
-  // For now, randomly select a winner
-  const randomIndex = Math.floor(Math.random() * playedCards.length);
-  return playedCards[randomIndex].playerId;
+  if (playedCards.length === 0) return '';
+
+  // Get the first played card's suit - it becomes the leading suit
+  const leadingSuit = playedCards[0].card.suit;
+  
+  // First, check for trump cards
+  const trumpCards = playedCards.filter(pc => pc.card.suit === trumpSuit);
+  
+  if (trumpCards.length > 0) {
+    // If there are trump cards, highest trump wins
+    return trumpCards.reduce((highest, current) => {
+      const highestValue = BRISCOLA_VALUE_ORDER.indexOf(highest.card.value);
+      const currentValue = BRISCOLA_VALUE_ORDER.indexOf(current.card.value);
+      return currentValue < highestValue ? current : highest;
+    }, trumpCards[0]).playerId;
+  }
+  
+  // If no trumps, check cards of the leading suit
+  const leadingSuitCards = playedCards.filter(pc => pc.card.suit === leadingSuit);
+  
+  if (leadingSuitCards.length > 0) {
+    // Highest card of leading suit wins
+    return leadingSuitCards.reduce((highest, current) => {
+      const highestValue = BRISCOLA_VALUE_ORDER.indexOf(highest.card.value);
+      const currentValue = BRISCOLA_VALUE_ORDER.indexOf(current.card.value);
+      return currentValue < highestValue ? current : highest;
+    }, leadingSuitCards[0]).playerId;
+  }
+  
+  // If somehow we get here (shouldn't in normal play), first player wins
+  return playedCards[0].playerId;
 };
 
 // Calculate final scores based on card values
@@ -266,7 +294,8 @@ const GameApp: React.FC = () => {
     const fullDeck = shuffleDeck(createDeck());
     const trumpCard = fullDeck.pop()!; // Remove trump card from deck
 
-    // Balance deck so remaining cards are divisible by number of players
+    // Balance deck so remaining cards are divisible by number of players ###############################
+    // Note for Seb: There are 40 cards in a deck. When trump card is removed, that, makes it 39. The 39 cannot be divided by 2. I get that. In RL, when it is a 1v1, or the number of players is even, the cards available will be odd. In that scenario, after the penultimate round, only the trump card and final card from the deck will be remaining. As rules say, this is true throughout the whole game, the winner of the round picks up a card first, so in this scenario, the previous winner would pick up the final card of the deck and opponent would pick up the trump card. This also leads to some strategic plays, i.e. a player wants to have the trump card, so to do this they lose the penultimate round so that their opponent picks up the final deck card while they pick up the trump card. Eliminating cards from the deck also removes ability to card count, which is another good strategy to out-wit your opponnt. So we somehow need to make it that when n. of players is even (if remainigcards % players != 0: ...) the last player picks up the trump card. The trump suit remains the same tho, so that info needs to stay there. 
     const remainingCards = fullDeck.length;
     const cardsToRemove = remainingCards % players.length;
 
@@ -464,7 +493,7 @@ const GameApp: React.FC = () => {
       if (newDeck.length > 0) {
         showNotification(`Round ${gameState.currentRound} complete! Cards drawn. ${winnerInfo?.username} starts next round.`, NotificationType.INFO);
       } else {
-        // Deck is empty but players still have cards - final rounds
+        // Deck is empty but players still have cards - final rounds - ENDGAME - I'm being difficult, but could we have something come up saying ENDGAME?
         const maxHandSize = Math.max(...Object.values(newHands).map(hand => hand.length));
         showNotification(`Round ${gameState.currentRound} complete! No more cards to draw. ${maxHandSize} final rounds remaining.`, NotificationType.INFO);
       }
